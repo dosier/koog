@@ -1,13 +1,15 @@
+@file:OptIn(ExperimentalTime::class)
 package ai.koog.prompt.dsl
 
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.params.LLMParams.Schema
 import ai.koog.prompt.params.LLMParams.ToolChoice
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlinx.serialization.Serializable
 import kotlin.jvm.JvmOverloads
 import kotlin.time.Duration
+import kotlin.time.ExperimentalTime
 
 /**
  * Represents a data structure for a prompt, consisting of a list of messages, a unique identifier,

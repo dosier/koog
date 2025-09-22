@@ -15,7 +15,7 @@ import ai.koog.agents.core.feature.handler.NodeAfterExecuteContext
 import ai.koog.agents.core.feature.handler.NodeBeforeExecuteContext
 import ai.koog.agents.core.feature.handler.NodeExecutionErrorContext
 import ai.koog.agents.core.feature.handler.NodeExecutionErrorHandler
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlin.reflect.KType
 
 /**

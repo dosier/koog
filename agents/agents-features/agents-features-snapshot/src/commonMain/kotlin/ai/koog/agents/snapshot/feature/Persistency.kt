@@ -13,7 +13,7 @@ import ai.koog.agents.core.feature.InterceptContext
 import ai.koog.agents.snapshot.providers.PersistencyStorageProvider
 import ai.koog.prompt.message.Message
 import io.github.oshai.kotlinlogging.KotlinLogging
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
