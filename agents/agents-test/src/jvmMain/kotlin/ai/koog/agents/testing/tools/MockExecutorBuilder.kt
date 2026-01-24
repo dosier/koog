@@ -4,7 +4,7 @@ import ai.koog.agents.annotations.JavaAPI
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.tokenizer.Tokenizer
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import java.util.function.Function
 
 /**

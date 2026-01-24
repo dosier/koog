@@ -117,13 +117,17 @@ public sealed interface AnthropicMessage {
  *
  * @property text The content of the message.
  * @property type The type of message, defaulted to "text".
+ * @property cacheControl Optional cache control configuration for prompt caching.
+ *                        When set, this content block will be cached by the provider.
  */
 @InternalLLMClientApi
 @Serializable
 public data class SystemAnthropicMessage(
     val text: String,
     @EncodeDefault
-    val type: String = "text"
+    val type: String = "text",
+    @SerialName("cache_control")
+    val cacheControl: AnthropicCacheControl? = null
 )
 
 /**
@@ -394,13 +398,17 @@ public sealed interface AnthropicThinking {
  * @property name The unique name of the tool.
  * @property description A human-readable description of the tool's purpose or functionality.
  * @property inputSchema The schema representing the structure of the input required by the tool.
+ * @property cacheControl Optional cache control configuration for prompt caching.
+ *                        When set, tools up to and including this one will be cached by the provider.
  */
 @InternalLLMClientApi
 @Serializable
 public data class AnthropicTool(
     val name: String,
     val description: String,
-    val inputSchema: AnthropicToolSchema
+    val inputSchema: AnthropicToolSchema,
+    @SerialName("cache_control")
+    val cacheControl: AnthropicCacheControl? = null
 )
 
 /**
@@ -459,6 +467,8 @@ public data class AnthropicResponse(
  *
  * @property inputTokens The number of tokens sent as input to the LLM. Optional in streaming responses.
  * @property outputTokens The number of tokens received as output from the LLM. Optional in streaming responses.
+ * @property cacheCreationInputTokens The number of tokens written to the cache. Present when prompt caching is enabled.
+ * @property cacheReadInputTokens The number of tokens read from the cache. Present when a cache hit occurs.
  *
  * Note: This API is marked with [InternalLLMClientApi] and is intended for internal use only.
  */
@@ -467,6 +477,8 @@ public data class AnthropicResponse(
 public data class AnthropicUsage(
     val inputTokens: Int? = null,
     val outputTokens: Int? = null,
+    val cacheCreationInputTokens: Int? = null,
+    val cacheReadInputTokens: Int? = null,
 )
 
 /**
@@ -618,6 +630,32 @@ public sealed interface AnthropicToolChoice {
     @Serializable
     @SerialName("tool")
     public data class Tool(val name: String) : AnthropicToolChoice
+}
+
+/**
+ * Represents cache control configuration for Anthropic prompt caching.
+ *
+ * When applied to a content block (system message, tool, or user message content),
+ * the provider will cache all content up to and including that block.
+ * Subsequent requests with the same prefix will use the cached content,
+ * reducing latency and cost.
+ *
+ * @property type The type of cache control. Currently only "ephemeral" is supported by Anthropic.
+ *               Ephemeral caches have a minimum TTL of 5 minutes, refreshed on each use.
+ */
+@InternalLLMClientApi
+@Serializable
+public data class AnthropicCacheControl(
+    @EncodeDefault
+    val type: String = "ephemeral"
+) {
+    public companion object {
+        /**
+         * Creates an ephemeral cache control with 5-minute TTL (refreshed on use).
+         * This is the default and most cost-effective option.
+         */
+        public val Ephemeral: AnthropicCacheControl = AnthropicCacheControl("ephemeral")
+    }
 }
 
 internal object AnthropicMessageRequestSerializer :

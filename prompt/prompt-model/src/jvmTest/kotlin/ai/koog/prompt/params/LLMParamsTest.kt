@@ -273,4 +273,30 @@ class LLMParamsTest {
 
         copied shouldBeEqualToComparingFields original
     }
+
+    @Test
+    fun testCacheControlEphemeral() {
+        val cacheControl = LLMParams.CacheControl.Ephemeral
+        assertEquals(LLMParams.CacheControl.Ephemeral, cacheControl)
+    }
+
+    @Test
+    fun testCacheControlExtended() {
+        val cacheControl = LLMParams.CacheControl.Extended
+        assertEquals(LLMParams.CacheControl.Extended, cacheControl)
+    }
+
+    @Test
+    fun testCacheControlSealedInterface() {
+        // Verify that CacheControl is a sealed interface with exactly two implementations
+        val ephemeral: LLMParams.CacheControl = LLMParams.CacheControl.Ephemeral
+        val extended: LLMParams.CacheControl = LLMParams.CacheControl.Extended
+
+        // Both should be distinct
+        assert(ephemeral != extended)
+
+        // Both should be instances of CacheControl
+        assert(ephemeral is LLMParams.CacheControl)
+        assert(extended is LLMParams.CacheControl)
+    }
 }

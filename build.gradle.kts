@@ -17,7 +17,7 @@ import java.util.Base64
 version = run {
     // our version follows the semver specification
 
-    val baseVersion = "0.7.0"
+    val baseVersion = "0.6.0"
 
     val feat = run {
         val releaseBuild = !System.getenv("BRANCH_KOOG_IS_RELEASING_FROM").isNullOrBlank()
@@ -67,12 +67,17 @@ version = run {
                 }
             }
         } else {
-            // do not care
-            "-SNAPSHOT"
+            // Local build - check for KOOG_LOCAL_VERSION env var or default to SNAPSHOT
+            val localVersion = System.getenv("KOOG_LOCAL_VERSION")
+            if (!localVersion.isNullOrBlank()) {
+                "-$localVersion"
+            } else {
+                "-SNAPSHOT"
+            }
         }
     }
 
-    "$baseVersion$feat"
+    "0.6.0-flopiq-1"
 }
 
 fun isCustomReleaseBranch(branchName: String): Boolean = branchName.matches(Regex("""^\d+\.\d+\.\d+$"""))

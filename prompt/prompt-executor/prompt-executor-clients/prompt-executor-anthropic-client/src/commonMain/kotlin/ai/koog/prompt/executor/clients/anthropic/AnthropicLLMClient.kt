@@ -17,6 +17,7 @@ import ai.koog.prompt.executor.clients.anthropic.models.AnthropicResponse
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicStreamDeltaContentType
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicStreamEventType
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicStreamResponse
+import ai.koog.prompt.executor.clients.anthropic.models.AnthropicCacheControl
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicTool
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicToolChoice
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicToolSchema
@@ -46,7 +47,7 @@ import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -182,10 +183,14 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
         return buildStreamFrameFlow {
             var inputTokens: Int? = null
             var outputTokens: Int? = null
+            var cacheCreationTokens: Int? = null
+            var cacheReadTokens: Int? = null
 
             fun updateUsage(usage: AnthropicUsage) {
                 inputTokens = usage.inputTokens ?: inputTokens
                 outputTokens = usage.outputTokens ?: outputTokens
+                cacheCreationTokens = usage.cacheCreationInputTokens ?: cacheCreationTokens
+                cacheReadTokens = usage.cacheReadInputTokens ?: cacheReadTokens
             }
 
             fun getMetaInfo(): ResponseMetaInfo = ResponseMetaInfo.create(
@@ -193,6 +198,8 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                 totalTokensCount = inputTokens?.plus(outputTokens ?: 0) ?: outputTokens,
                 inputTokensCount = inputTokens,
                 outputTokensCount = outputTokens,
+                cacheCreationTokens = cacheCreationTokens,
+                cacheReadTokens = cacheReadTokens,
             )
 
             try {
@@ -302,6 +309,9 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
         model: LLModel,
         stream: Boolean
     ): String {
+        val anthropicParams = prompt.params.toAnthropicParams()
+        val cacheControl = anthropicParams.cacheControl?.toAnthropicCacheControl()
+        
         val systemMessage = mutableListOf<SystemAnthropicMessage>()
         val messages = mutableListOf<AnthropicMessage>()
 
@@ -369,7 +379,21 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
             }
         }
 
-        val anthropicTools = tools.map { tool ->
+        // Apply cache control to the last system message if caching is enabled
+        val systemMessagesWithCache = if (cacheControl != null && systemMessage.isNotEmpty()) {
+            systemMessage.mapIndexed { index, msg ->
+                // Apply cache control to the last system message
+                if (index == systemMessage.lastIndex) {
+                    msg.copy(cacheControl = cacheControl)
+                } else {
+                    msg
+                }
+            }
+        } else {
+            systemMessage
+        }
+
+        val anthropicTools = tools.mapIndexed { index, tool ->
             val properties = mutableMapOf<String, JsonElement>()
 
             (tool.requiredParameters + tool.optionalParameters).forEach { param ->
@@ -380,24 +404,40 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                 )
             }
 
+            // Apply cache control to the last tool if caching is enabled
+            val toolCacheControl = if (cacheControl != null && index == tools.lastIndex) {
+                cacheControl
+            } else {
+                null
+            }
+
             AnthropicTool(
                 name = tool.name,
                 description = tool.description,
                 inputSchema = AnthropicToolSchema(
                     properties = JsonObject(properties),
                     required = tool.requiredParameters.map { it.name }
-                )
+                ),
+                cacheControl = toolCacheControl
             )
         }
 
         return serializeAnthropicMessageRequest(
             messages,
-            systemMessage,
+            systemMessagesWithCache,
             model,
             anthropicTools,
             prompt.params,
             stream
         )
+    }
+    
+    /**
+     * Converts the framework's CacheControl to Anthropic's cache control format.
+     */
+    private fun LLMParams.CacheControl.toAnthropicCacheControl(): AnthropicCacheControl = when (this) {
+        LLMParams.CacheControl.Ephemeral -> AnthropicCacheControl.Ephemeral
+        LLMParams.CacheControl.Extended -> AnthropicCacheControl.Ephemeral // Anthropic only supports ephemeral currently
     }
 
     private fun serializeAnthropicMessageRequest(
@@ -505,11 +545,17 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
         val inputTokensCount = response.usage?.inputTokens
         val outputTokensCount = response.usage?.outputTokens
         val totalTokensCount = response.usage?.let { it.inputTokens?.plus(it.outputTokens ?: 0) ?: it.outputTokens }
+        // Extract cache metrics from the response
+        val cacheCreationTokens = response.usage?.cacheCreationInputTokens
+        val cacheReadTokens = response.usage?.cacheReadInputTokens
+        
         val metaInfo = ResponseMetaInfo.create(
             clock,
             totalTokensCount = totalTokensCount,
             inputTokensCount = inputTokensCount,
             outputTokensCount = outputTokensCount,
+            cacheCreationTokens = cacheCreationTokens,
+            cacheReadTokens = cacheReadTokens,
         )
 
         val responses = response.content.map { content ->
@@ -559,6 +605,8 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                         totalTokensCount = totalTokensCount,
                         inputTokensCount = inputTokensCount,
                         outputTokensCount = outputTokensCount,
+                        cacheCreationTokens = cacheCreationTokens,
+                        cacheReadTokens = cacheReadTokens,
                     )
                 )
             )

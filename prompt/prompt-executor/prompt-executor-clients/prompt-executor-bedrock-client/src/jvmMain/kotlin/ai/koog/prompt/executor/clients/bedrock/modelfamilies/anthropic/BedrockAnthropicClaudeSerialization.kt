@@ -21,7 +21,7 @@ import ai.koog.prompt.streaming.StreamFrame
 import ai.koog.prompt.streaming.buildStreamFrameFlow
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.flow.Flow
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
 import kotlinx.serialization.json.JsonObject
@@ -192,11 +192,16 @@ internal object BedrockAnthropicClaudeSerialization {
         val inputTokens = response.usage?.inputTokens
         val outputTokens = response.usage?.outputTokens
         val totalTokens = inputTokens?.let { input -> outputTokens?.let { output -> input + output } }
+        // Extract cache metrics from Anthropic response via Bedrock
+        val cacheCreationTokens = response.usage?.cacheCreationInputTokens
+        val cacheReadTokens = response.usage?.cacheReadInputTokens
         val metaInfo = ResponseMetaInfo.create(
             clock,
             totalTokensCount = totalTokens,
             inputTokensCount = inputTokens,
-            outputTokensCount = outputTokens
+            outputTokensCount = outputTokens,
+            cacheCreationTokens = cacheCreationTokens,
+            cacheReadTokens = cacheReadTokens,
         )
 
         return response.content.map { content ->
@@ -231,10 +236,14 @@ internal object BedrockAnthropicClaudeSerialization {
     ): Flow<StreamFrame> = buildStreamFrameFlow {
         var inputTokens: Int? = null
         var outputTokens: Int? = null
+        var cacheCreationTokens: Int? = null
+        var cacheReadTokens: Int? = null
 
         fun updateUsage(usage: AnthropicUsage) {
             inputTokens = usage.inputTokens ?: inputTokens
             outputTokens = usage.outputTokens ?: outputTokens
+            cacheCreationTokens = usage.cacheCreationInputTokens ?: cacheCreationTokens
+            cacheReadTokens = usage.cacheReadInputTokens ?: cacheReadTokens
         }
 
         fun getMetaInfo(): ResponseMetaInfo = ResponseMetaInfo.create(
@@ -242,6 +251,8 @@ internal object BedrockAnthropicClaudeSerialization {
             totalTokensCount = inputTokens?.plus(outputTokens ?: 0) ?: outputTokens,
             inputTokensCount = inputTokens,
             outputTokensCount = outputTokens,
+            cacheCreationTokens = cacheCreationTokens,
+            cacheReadTokens = cacheReadTokens,
         )
 
         chunkJsonStringFlow.collect { chunkJsonString ->

@@ -49,7 +49,7 @@ import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
 import kotlin.io.encoding.ExperimentalEncodingApi
@@ -480,12 +480,20 @@ public abstract class AbstractOpenAILLMClient<TResponse : OpenAIBaseLLMResponse,
     /**
      * Creates ResponseMetaInfo from usage data.
      * Should be used by concrete implementations when processing responses.
+     * 
+     * Includes cache metrics from OpenAI's automatic prompt caching when available.
+     * OpenAI automatically caches prompts longer than 1,024 tokens and returns
+     * cached token counts in the usage response.
      */
     protected fun createMetaInfo(usage: OpenAIUsage?): ResponseMetaInfo = ResponseMetaInfo.create(
         clock,
         totalTokensCount = usage?.totalTokens,
         inputTokensCount = usage?.promptTokens,
-        outputTokensCount = usage?.completionTokens
+        outputTokensCount = usage?.completionTokens,
+        // OpenAI returns cached tokens in promptTokensDetails.cachedTokens
+        // Note: OpenAI doesn't have separate cache creation tokens - caching is automatic
+        cacheCreationTokens = null,
+        cacheReadTokens = usage?.promptTokensDetails?.cachedTokens,
     )
 
     protected open fun createResponseFormat(schema: LLMParams.Schema?, model: LLModel): OpenAIResponseFormat? {

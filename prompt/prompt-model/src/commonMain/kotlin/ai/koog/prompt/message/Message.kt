@@ -1,7 +1,7 @@
 package ai.koog.prompt.message
 
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
+import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -397,6 +397,19 @@ public data class ResponseMetaInfo(
     public val totalTokensCount: Int? = null,
     public val inputTokensCount: Int? = null,
     public val outputTokensCount: Int? = null,
+    /**
+     * Number of tokens written to the provider's cache in this request.
+     * These tokens are cached for future requests with the same prompt prefix.
+     * Cache write tokens typically cost 25% more than regular input tokens.
+     * A non-null value indicates tokens were written to cache (cache miss on prefix).
+     */
+    public val cacheCreationTokens: Int? = null,
+    /**
+     * Number of tokens read from the provider's cache in this request.
+     * These tokens were previously cached and retrieved at a reduced cost (typically 10% of input price).
+     * A non-null value indicates a cache hit occurred.
+     */
+    public val cacheReadTokens: Int? = null,
     @Deprecated(
         "additionalInfo is deprecated, use metadata instead",
         ReplaceWith("metadata")
@@ -416,6 +429,8 @@ public data class ResponseMetaInfo(
          * @param totalTokensCount The total number of tokens involved in the response, including both input and output tokens.
          * @param inputTokensCount The number of tokens used in the input.
          * @param outputTokensCount The number of tokens generated in the output.
+         * @param cacheCreationTokens Number of tokens written to the provider's cache.
+         * @param cacheReadTokens Number of tokens read from the provider's cache.
          * @param additionalInfo Deprecated: use [metadata] instead. Additional metadata as a map of string keys to string values.
          * @param metadata Additional metadata as a JSON object.
          * @return A new ResponseMetadata instance with the timestamp from the provided clock.
@@ -425,6 +440,8 @@ public data class ResponseMetaInfo(
             totalTokensCount: Int? = null,
             inputTokensCount: Int? = null,
             outputTokensCount: Int? = null,
+            cacheCreationTokens: Int? = null,
+            cacheReadTokens: Int? = null,
             additionalInfo: Map<String, String> = emptyMap(),
             metadata: JsonObject? = null,
         ): ResponseMetaInfo =
@@ -433,6 +450,8 @@ public data class ResponseMetaInfo(
                 totalTokensCount,
                 inputTokensCount,
                 outputTokensCount,
+                cacheCreationTokens,
+                cacheReadTokens,
                 additionalInfo,
                 metadata
             )

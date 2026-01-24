@@ -273,11 +273,16 @@ internal object BedrockConverseConverters {
         val inputTokensCount = response.usage?.inputTokens
         val outputTokensCount = response.usage?.outputTokens
         val totalTokensCount = response.usage?.totalTokens
+        // Note: AWS SDK Kotlin Bedrock Converse API TokenUsage doesn't currently expose cache metrics directly.
+        // Cache metrics are available via InvokeModel API with Anthropic models.
+        // When AWS SDK adds cache fields to TokenUsage, update this to extract them.
         val metaInfo = ResponseMetaInfo.create(
             clock,
             totalTokensCount = totalTokensCount,
             inputTokensCount = inputTokensCount,
             outputTokensCount = outputTokensCount,
+            cacheCreationTokens = null, // TODO: Extract when AWS SDK adds cache fields
+            cacheReadTokens = null,     // TODO: Extract when AWS SDK adds cache fields
         )
 
         val content = response.output?.asMessageOrNull()?.content.orEmpty()
@@ -327,12 +332,7 @@ internal object BedrockConverseConverters {
                 Message.Assistant(
                     content = "",
                     finishReason = response.stopReason.value,
-                    metaInfo = ResponseMetaInfo.create(
-                        clock,
-                        totalTokensCount = totalTokensCount,
-                        inputTokensCount = inputTokensCount,
-                        outputTokensCount = outputTokensCount,
-                    )
+                    metaInfo = metaInfo
                 )
             )
         }
@@ -422,6 +422,9 @@ internal object BedrockConverseConverters {
                             totalTokensCount = usage?.totalTokens,
                             inputTokensCount = usage?.inputTokens,
                             outputTokensCount = usage?.outputTokens,
+                            // Note: AWS SDK Kotlin Bedrock Converse API doesn't currently expose cache metrics.
+                            cacheCreationTokens = null,
+                            cacheReadTokens = null,
                         )
                     )
                 }

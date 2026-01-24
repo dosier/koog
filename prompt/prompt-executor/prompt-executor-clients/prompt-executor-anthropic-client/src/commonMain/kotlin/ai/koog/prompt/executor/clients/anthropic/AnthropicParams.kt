@@ -17,6 +17,7 @@ internal fun LLMParams.toAnthropicParams(): AnthropicParams {
         toolChoice = toolChoice,
         user = user,
         additionalProperties = additionalProperties,
+        cacheControl = (this as? LLMParams)?.let { null }, // CacheControl not available in base LLMParams
     )
 }
 
@@ -42,6 +43,10 @@ internal fun LLMParams.toAnthropicParams(): AnthropicParams {
  * @property mcpServers MCP servers to be used in this request
  * @property serviceTier Determines whether to use priority capacity (if available) or standard capacity for this request.
  * @property thinking Configuration for enabling Claude's extended thinking.
+ * @property cacheControl Controls provider-level prompt caching for system messages and tools.
+ *   When enabled, static content (system prompts, tools) will be cached by Anthropic,
+ *   reducing latency (>2x) and cost (up to 90%) for repeated requests with the same prefix.
+ *   Cache has a minimum TTL of 5 minutes, refreshed on each use.
  */
 @Suppress("LongParameterList")
 public class AnthropicParams(
@@ -60,6 +65,7 @@ public class AnthropicParams(
     public val mcpServers: List<AnthropicMCPServerURLDefinition>? = null,
     public val serviceTier: AnthropicServiceTier? = null,
     public val thinking: AnthropicThinking? = null,
+    public val cacheControl: CacheControl? = null,
 ) : LLMParams(
     temperature,
     maxTokens,
@@ -120,6 +126,7 @@ public class AnthropicParams(
         mcpServers: List<AnthropicMCPServerURLDefinition>? = this.mcpServers,
         serviceTier: AnthropicServiceTier? = this.serviceTier,
         thinking: AnthropicThinking? = this.thinking,
+        cacheControl: CacheControl? = this.cacheControl,
     ): AnthropicParams = AnthropicParams(
         temperature = temperature,
         maxTokens = maxTokens,
@@ -136,6 +143,7 @@ public class AnthropicParams(
         mcpServers = mcpServers,
         serviceTier = serviceTier,
         thinking = thinking,
+        cacheControl = cacheControl,
     )
 
     override fun equals(other: Any?): Boolean = when {
@@ -156,7 +164,8 @@ public class AnthropicParams(
                 container == other.container &&
                 mcpServers == other.mcpServers &&
                 serviceTier == other.serviceTier &&
-                thinking == other.thinking
+                thinking == other.thinking &&
+                cacheControl == other.cacheControl
     }
 
     override fun hashCode(): Int = listOf(
@@ -164,7 +173,7 @@ public class AnthropicParams(
         speculation, schema, toolChoice, user,
         additionalProperties, topP, topK,
         stopSequences, container, mcpServers,
-        serviceTier, thinking
+        serviceTier, thinking, cacheControl
     ).fold(0) { acc, element ->
         31 * acc + (element?.hashCode() ?: 0)
     }
@@ -186,6 +195,7 @@ public class AnthropicParams(
         append(", mcpServers=$mcpServers")
         append(", serviceTier=$serviceTier")
         append(", thinking=$thinking")
+        append(", cacheControl=$cacheControl")
         append(")")
     }
 }

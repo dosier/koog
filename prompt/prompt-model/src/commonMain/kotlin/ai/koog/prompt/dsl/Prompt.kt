@@ -5,13 +5,14 @@ import ai.koog.prompt.message.Message
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.params.LLMParams.Schema
 import ai.koog.prompt.params.LLMParams.ToolChoice
-import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
 import kotlin.jvm.JvmField
 import kotlin.jvm.JvmName
 import kotlin.jvm.JvmOverloads
 import kotlin.jvm.JvmStatic
+import kotlin.time.Clock
 import kotlin.time.Duration
+import kotlin.time.ExperimentalTime
 
 /**
  * Represents a data structure for a prompt, consisting of a list of messages, a unique identifier,
@@ -40,6 +41,7 @@ public data class Prompt @JvmOverloads constructor(
          * @param clock The clock used for timestamping or time-related operations. Defaults to `Clock.System` if not provided.
          * @return A new instance of `PromptBuilder` with the specified ID and clock.
          */
+        @OptIn(ExperimentalTime::class)
         @JvmStatic
         @JvmOverloads
         @JavaAPI
@@ -64,6 +66,7 @@ public data class Prompt @JvmOverloads constructor(
          * @param init The initialization logic applied to the `PromptBuilder`.
          * @return The constructed `Prompt` object.
          */
+        @OptIn(ExperimentalTime::class)
         @JvmOverloads
         public fun build(
             id: String,
@@ -84,6 +87,7 @@ public data class Prompt @JvmOverloads constructor(
          * @param init The initialization block applied to configure the [PromptBuilder].
          * @return A new [Prompt] instance configured with the specified initialization logic.
          */
+        @OptIn(ExperimentalTime::class)
         public fun build(prompt: Prompt, clock: Clock = Clock.System, init: PromptBuilder.() -> Unit): Prompt {
             return PromptBuilder.from(prompt, clock).also(init).build()
         }
@@ -113,6 +117,7 @@ public data class Prompt @JvmOverloads constructor(
      *
      * If no messages are present, the total time spent is `0`.
      */
+    @OptIn(ExperimentalTime::class)
     @get:JvmName("totalTimeSpent")
     public val totalTimeSpent: Duration
         get() = when {

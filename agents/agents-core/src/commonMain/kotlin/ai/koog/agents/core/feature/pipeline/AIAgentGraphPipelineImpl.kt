@@ -25,7 +25,7 @@ import ai.koog.agents.core.feature.handler.subgraph.SubgraphExecutionFailedHandl
 import ai.koog.agents.core.feature.handler.subgraph.SubgraphExecutionStartingContext
 import ai.koog.agents.core.feature.handler.subgraph.SubgraphExecutionStartingHandler
 import kotlinx.coroutines.Dispatchers
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlin.reflect.KType
 
 internal class AIAgentGraphPipelineImpl(

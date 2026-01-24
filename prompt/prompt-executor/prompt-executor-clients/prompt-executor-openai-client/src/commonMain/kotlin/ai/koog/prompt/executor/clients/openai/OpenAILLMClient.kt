@@ -62,7 +62,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.jvm.JvmOverloads
 import kotlin.uuid.ExperimentalUuidApi
@@ -790,7 +790,10 @@ public open class OpenAILLMClient @JvmOverloads constructor(
             clock,
             totalTokensCount = response.usage?.totalTokens,
             inputTokensCount = response.usage?.inputTokens,
-            outputTokensCount = response.usage?.outputTokens
+            outputTokensCount = response.usage?.outputTokens,
+            // OpenAI Responses API returns cached tokens in inputTokensDetails.cachedTokens
+            cacheCreationTokens = null,
+            cacheReadTokens = response.usage?.inputTokensDetails?.cachedTokens,
         )
 
         return response.output
