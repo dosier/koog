@@ -1,32 +1,21 @@
 package ai.koog.agents.features.tokenizer.feature
 
 import ai.koog.agents.core.tools.SimpleTool
-import ai.koog.agents.core.tools.ToolArgs
-import ai.koog.agents.core.tools.ToolDescriptor
-import ai.koog.agents.core.tools.ToolParameterDescriptor
-import ai.koog.agents.core.tools.ToolParameterType
-import kotlinx.serialization.KSerializer
+import ai.koog.agents.core.tools.annotations.LLMDescription
 import kotlinx.serialization.Serializable
 
-abstract class TestTool(toolName: String) : SimpleTool<TestTool.Args>() {
+abstract class TestTool(name: String) : SimpleTool<TestTool.Args>(
+    argsSerializer = Args.serializer(),
+    name = name,
+    description = "$name description"
+) {
     @Serializable
-    data class Args(val question: String) : ToolArgs
-
-    override val argsSerializer: KSerializer<Args> = Args.serializer()
-
-    override val descriptor: ToolDescriptor = ToolDescriptor(
-        name = toolName,
-        description = "$toolName description",
-        requiredParameters = listOf(
-            ToolParameterDescriptor(
-                name = "question",
-                description = "question description",
-                type = ToolParameterType.String
-            )
-        )
+    data class Args(
+        @property:LLMDescription("question description")
+        val question: String
     )
 
-    override suspend fun doExecute(args: Args): String {
+    override suspend fun execute(args: Args): String {
         return "Answer to ${args.question} from tool `$name`"
     }
 }

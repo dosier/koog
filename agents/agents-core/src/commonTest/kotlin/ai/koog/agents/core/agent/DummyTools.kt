@@ -1,41 +1,27 @@
 package ai.koog.agents.core.agent
 
 import ai.koog.agents.core.tools.SimpleTool
-import ai.koog.agents.core.tools.ToolArgs
-import ai.koog.agents.core.tools.ToolDescriptor
-import ai.koog.agents.core.tools.ToolParameterDescriptor
-import ai.koog.agents.core.tools.ToolParameterType
+import ai.koog.agents.core.tools.annotations.LLMDescription
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.serializer
 
-object DummyTool : SimpleTool<ToolArgs.Empty>() {
-    override val argsSerializer = ToolArgs.Empty.serializer()
-
-    override val descriptor = ToolDescriptor(
-        name = "dummy",
-        description = "Dummy tool for testing",
-        requiredParameters = emptyList()
-    )
-
-    override suspend fun doExecute(args: ToolArgs.Empty): String = "Dummy result"
+object DummyTool : SimpleTool<Unit>(
+    argsSerializer = Unit.serializer(),
+    name = "dummy_tool",
+    description = "Dummy tool for testing"
+) {
+    override suspend fun execute(args: Unit): String = "Dummy result"
 }
 
-object CreateTool : SimpleTool<CreateTool.Args>() {
+object CreateTool : SimpleTool<CreateTool.Args>(
+    argsSerializer = Args.serializer(),
+    name = "create",
+    description = "Create something"
+) {
     @Serializable
-    data class Args(val name: String) : ToolArgs
-
-    override val argsSerializer = Args.serializer()
-
-    override val descriptor = ToolDescriptor(
-        name = "create",
-        description = "Create something",
-        requiredParameters = listOf(
-            ToolParameterDescriptor(
-                name = "name",
-                description = "Name of the entity to create",
-                type = ToolParameterType.String
-            )
-        )
+    data class Args(
+        @property:LLMDescription("Name of the entity to create") val name: String
     )
 
-    override suspend fun doExecute(args: Args): String = "created"
+    override suspend fun execute(args: Args): String = "created"
 }

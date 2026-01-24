@@ -1,17 +1,17 @@
 package ai.koog.agents.ext.tool
 
 import ai.koog.agents.core.tools.SimpleTool
-import ai.koog.agents.core.tools.ToolArgs
-import ai.koog.agents.core.tools.ToolDescriptor
-import ai.koog.agents.core.tools.ToolParameterDescriptor
-import ai.koog.agents.core.tools.ToolParameterType
-import kotlinx.serialization.KSerializer
+import ai.koog.agents.core.tools.annotations.LLMDescription
 import kotlinx.serialization.Serializable
 
 /**
  * The `SayToUser` allows agent to say something to the output (via `println`).
  */
-public object SayToUser : SimpleTool<SayToUser.Args>() {
+public object SayToUser : SimpleTool<SayToUser.Args>(
+    argsSerializer = Args.serializer(),
+    name = "say_to_user",
+    description = "Service tool, used by the agent to talk."
+) {
     /**
      * Represents the arguments for the [SayToUser] tool
      *
@@ -19,23 +19,12 @@ public object SayToUser : SimpleTool<SayToUser.Args>() {
      * required for tool execution.
      */
     @Serializable
-    public data class Args(val message: String) : ToolArgs
-
-    override val argsSerializer: KSerializer<Args> = Args.serializer()
-
-    override val descriptor: ToolDescriptor = ToolDescriptor(
-        name = "say_to_user",
-        description = "Service tool, used by the agent to talk.",
-        requiredParameters = listOf(
-            ToolParameterDescriptor(
-                name = "message",
-                description = "Message from the agent",
-                type = ToolParameterType.String
-            ),
-        ),
+    public data class Args(
+        @property:LLMDescription("Message from the agent")
+        val message: String
     )
 
-    override suspend fun doExecute(args: Args): String {
+    override suspend fun execute(args: Args): String {
         println("Agent says: ${args.message}")
         return "DONE"
     }

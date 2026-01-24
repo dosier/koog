@@ -14,11 +14,10 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Base64
 
-group = "ai.koog"
 version = run {
     // our version follows the semver specification
 
-    val main = "0.4.3"
+    val baseVersion = "0.6.0"
 
     val feat = run {
         val releaseBuild = !System.getenv("BRANCH_KOOG_IS_RELEASING_FROM").isNullOrBlank()
@@ -40,16 +39,16 @@ version = run {
                 "-$branch-$date"
             }
         } else if (releaseBuild) {
-            when (branch) {
-                "main" -> {
-                    if (customVersion.isNullOrBlank()) {
-                        ""
-                    } else {
+            when {
+                branch == "main" || isCustomReleaseBranch(branch) -> {
+                    if (!customVersion.isNullOrBlank() && branch == "main") {
                         throw GradleException("Custom version is not allowed during release from the main branch")
                     }
+
+                    ""
                 }
 
-                "develop" -> {
+                branch == "develop" -> {
                     if (!customVersion.isNullOrBlank()) {
                         throw GradleException("Custom version is not allowed during release from the develop branch")
                     } else if (tcCounter.isNullOrBlank()) {
@@ -68,17 +67,25 @@ version = run {
                 }
             }
         } else {
-            // do not care
-            "-SNAPSHOT"
+            // Local build - check for KOOG_LOCAL_VERSION env var or default to SNAPSHOT
+            val localVersion = System.getenv("KOOG_LOCAL_VERSION")
+            if (!localVersion.isNullOrBlank()) {
+                "-$localVersion"
+            } else {
+                "-SNAPSHOT"
+            }
         }
     }
 
-    "$main$feat"
+    "0.6.0-flopiq-1"
 }
+
+fun isCustomReleaseBranch(branchName: String): Boolean = branchName.matches(Regex("""^\d+\.\d+\.\d+$"""))
 
 buildscript {
     dependencies {
-        classpath("com.squareup.okhttp3:okhttp:5.1.0")
+        classpath(platform(libs.okhttp.bom))
+        classpath(libs.okhttp)
     }
 }
 
@@ -118,12 +125,16 @@ subprojects {
         environment.putAll(
             mapOf(
                 "ANTHROPIC_API_TEST_KEY" to System.getenv("ANTHROPIC_API_TEST_KEY"),
-                "OPEN_AI_API_TEST_KEY" to System.getenv("OPEN_AI_API_TEST_KEY"),
-                "GEMINI_API_TEST_KEY" to System.getenv("GEMINI_API_TEST_KEY"),
-                "OPEN_ROUTER_API_TEST_KEY" to System.getenv("OPEN_ROUTER_API_TEST_KEY"),
-                "AWS_SECRET_ACCESS_KEY" to System.getenv("AWS_SECRET_ACCESS_KEY"),
                 "AWS_ACCESS_KEY_ID" to System.getenv("AWS_ACCESS_KEY_ID"),
+                "AWS_BEARER_TOKEN_BEDROCK" to System.getenv("AWS_BEARER_TOKEN_BEDROCK"),
+                "AWS_SECRET_ACCESS_KEY" to System.getenv("AWS_SECRET_ACCESS_KEY"),
+                "AWS_BEDROCK_GUARDRAIL_ID" to System.getenv("AWS_BEDROCK_GUARDRAIL_ID"),
+                "AWS_BEDROCK_GUARDRAIL_VERSION" to System.getenv("AWS_BEDROCK_GUARDRAIL_VERSION"),
                 "DEEPSEEK_API_TEST_KEY" to System.getenv("DEEPSEEK_API_TEST_KEY"),
+                "GEMINI_API_TEST_KEY" to System.getenv("GEMINI_API_TEST_KEY"),
+                "MISTRAL_AI_API_TEST_KEY" to System.getenv("MISTRAL_AI_API_TEST_KEY"),
+                "OPEN_AI_API_TEST_KEY" to System.getenv("OPEN_AI_API_TEST_KEY"),
+                "OPEN_ROUTER_API_TEST_KEY" to System.getenv("OPEN_ROUTER_API_TEST_KEY"),
             )
         )
     }
@@ -158,7 +169,8 @@ tasks {
             val uriBase = "https://central.sonatype.com/api/v1/publisher/upload"
 
             val mainBranch = System.getenv("BRANCH_KOOG_IS_RELEASING_FROM") == "main"
-            val publishingType = if (mainBranch) {
+            val customReleaseBranch = isCustomReleaseBranch(System.getenv("BRANCH_KOOG_IS_RELEASING_FROM"))
+            val publishingType = if (mainBranch || customReleaseBranch) {
                 println("Publishing from the main branch, so publishing as AUTOMATIC.")
                 "AUTOMATIC"
             } else {
@@ -201,20 +213,22 @@ tasks {
 
 dependencies {
     dokka(project(":agents:agents-core"))
-    dokka(project(":agents:agents-features:agents-features-debugger"))
+    dokka(project(":agents:agents-ext"))
     dokka(project(":agents:agents-features:agents-features-event-handler"))
     dokka(project(":agents:agents-features:agents-features-memory"))
     dokka(project(":agents:agents-features:agents-features-opentelemetry"))
     dokka(project(":agents:agents-features:agents-features-snapshot"))
-    dokka(project(":agents:agents-features:agents-features-trace"))
     dokka(project(":agents:agents-features:agents-features-tokenizer"))
+    dokka(project(":agents:agents-features:agents-features-trace"))
+    dokka(project(":agents:agents-planner"))
     dokka(project(":agents:agents-mcp"))
     dokka(project(":agents:agents-test"))
     dokka(project(":agents:agents-tools"))
     dokka(project(":agents:agents-utils"))
-    dokka(project(":agents:agents-ext"))
     dokka(project(":embeddings:embeddings-base"))
     dokka(project(":embeddings:embeddings-llm"))
+    dokka(project(":koog-ktor"))
+    dokka(project(":koog-spring-boot-starter"))
     dokka(project(":prompt:prompt-cache:prompt-cache-files"))
     dokka(project(":prompt:prompt-cache:prompt-cache-model"))
     dokka(project(":prompt:prompt-cache:prompt-cache-redis"))
@@ -224,23 +238,25 @@ dependencies {
     dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-bedrock-client"))
     dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-deepseek-client"))
     dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-google-client"))
+    dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-mistralai-client"))
     dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-ollama-client"))
     dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-openai-client"))
     dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-openai-client-base"))
     dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-openrouter-client"))
+    dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-dashscope-client"))
     dokka(project(":prompt:prompt-executor:prompt-executor-llms"))
     dokka(project(":prompt:prompt-executor:prompt-executor-llms-all"))
     dokka(project(":prompt:prompt-executor:prompt-executor-model"))
     dokka(project(":prompt:prompt-llm"))
     dokka(project(":prompt:prompt-markdown"))
     dokka(project(":prompt:prompt-model"))
+    dokka(project(":prompt:prompt-processor"))
     dokka(project(":prompt:prompt-structure"))
     dokka(project(":prompt:prompt-tokenizer"))
     dokka(project(":prompt:prompt-xml"))
-    dokka(project(":koog-spring-boot-starter"))
-    dokka(project(":koog-ktor"))
     dokka(project(":rag:rag-base"))
     dokka(project(":rag:vector-storage"))
+    dokka(project(":utils"))
 }
 
 kover {

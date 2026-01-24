@@ -1,7 +1,7 @@
 package ai.koog.agents.ext.tool.file
 
-import ai.koog.agents.core.tools.DirectToolCallsEnabler
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
+import ai.koog.agents.ext.tool.file.patch.isSuccess
 import ai.koog.agents.ext.utils.InMemoryFS
 import ai.koog.rag.base.files.readText
 import ai.koog.rag.base.files.writeText
@@ -10,6 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 @OptIn(InternalAgentToolsApi::class)
 class EditFileToolCoreTest {
@@ -29,7 +30,7 @@ class EditFileToolCoreTest {
             original = "World",
             replacement = "Koog"
         )
-        tool.execute(args, object : DirectToolCallsEnabler {})
+        tool.execute(args)
 
         // Then
         val updated = mockedFS.readText(path)
@@ -51,10 +52,10 @@ class EditFileToolCoreTest {
             original = "World",
             replacement = "Koog"
         )
-        val result = tool.execute(args, object : DirectToolCallsEnabler {})
+        val result = tool.execute(args)
 
         // Then
-        val markdownReport = result.toMarkdown()
+        val markdownReport = tool.encodeResultToString(result)
         assertContains(markdownReport, "Success")
         assertContains(markdownReport, "edit")
     }
@@ -80,7 +81,7 @@ class EditFileToolCoreTest {
             original = "world", // different case than in file
             replacement = "Koog"
         )
-        tool.execute(args, object : DirectToolCallsEnabler {})
+        tool.execute(args)
 
         // Then
         val updated = mockedFS.readText(path)
@@ -115,7 +116,7 @@ class EditFileToolCoreTest {
             original = "Hello    World", // more spaces than in file
             replacement = "Hello Koog"
         )
-        tool.execute(args, object : DirectToolCallsEnabler {})
+        tool.execute(args)
 
         // Then
         val updated = mockedFS.readText(path)
@@ -150,7 +151,7 @@ class EditFileToolCoreTest {
             original = "Hello World", // less spaces than in file
             replacement = "Hello Koog"
         )
-        tool.execute(args, object : DirectToolCallsEnabler {})
+        tool.execute(args)
 
         // Then
         val updated = mockedFS.readText(path)
@@ -185,7 +186,7 @@ class EditFileToolCoreTest {
             original = "Hello World\n",
             replacement = ""
         )
-        tool.execute(args, object : DirectToolCallsEnabler {})
+        tool.execute(args)
 
         // Then
         val updated = mockedFS.readText(path)
@@ -213,7 +214,7 @@ class EditFileToolCoreTest {
             original = "",
             replacement = newContent
         )
-        tool.execute(args, object : DirectToolCallsEnabler {})
+        tool.execute(args)
 
         // Then
         assertEquals(true, mockedFS.exists(path))
@@ -245,7 +246,7 @@ class EditFileToolCoreTest {
             original = "",
             replacement = replacementContent
         )
-        tool.execute(args, object : DirectToolCallsEnabler {})
+        tool.execute(args)
 
         // Then
         val updated = mockedFS.readText(path)
@@ -275,13 +276,13 @@ class EditFileToolCoreTest {
             original = "Delta", // does not exist in file
             replacement = "Omega"
         )
-        val result = tool.execute(args, object : DirectToolCallsEnabler {})
+        val result = tool.execute(args)
 
         // Then
-        val markdownReport = result.toMarkdown()
+        val markdownReport = tool.encodeResultToString(result)
         assertFalse(markdownReport.contains("Successfully"), "Markdown should not indicate a successful edit")
 
-        assertEquals(false, result.applied, "Patch should not be applied when original is not found")
+        assertTrue(!result.patchApplyResult.isSuccess(), "Patch should not be applied when original is not found")
 
         assertContains(
             markdownReport,

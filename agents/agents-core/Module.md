@@ -10,7 +10,7 @@ Key features include:
 - Agent definition and configuration
 - Graph-based execution model
 - Exception handling for common agent issues
-- Event subscription for monitoring agent execution
+- Interceptors for agent lifecycle, strategy, LLM, tool, and node events
 - Integration with LLM services
 - Tool registration and execution
 
@@ -78,3 +78,47 @@ val agent = AIAgent(
 // Run the agent
 val result = agent.execute("Calculate the square root of 16")
 ```
+
+
+### Standard Feature Events
+
+Features in the Koog ecosystem consume standardized Feature Events emitted by agents-core during agent execution. These events are defined in this module under the package `ai.koog.agents.core.feature.model.events`.
+
+- Agent events:
+  - AgentStartingEvent
+  - AgentCompletedEvent
+  - AgentExecutionFailedEvent
+  - AgentClosingEvent
+
+- Strategy events:
+  - GraphStrategyStartingEvent
+  - FunctionalStrategyStartingEvent
+  - StrategyCompletedEvent
+
+- Node execution events:
+  - NodeExecutionStartingEvent
+  - NodeExecutionCompletedEvent
+  - NodeExecutionFailedEvent
+
+- Subgraph execution events:
+  - SubgraphExecutionStartingEvent
+  - SubgraphExecutionCompletedEvent
+  - SubgraphExecutionFailedEvent
+
+- LLM call events:
+  - LLMCallStartingEvent
+  - LLMCallCompletedEvent
+
+- LLM streaming events:
+  - LLMStreamingStartingEvent
+  - LLMStreamingFrameReceivedEvent
+  - LLMStreamingFailedEvent
+  - LLMStreamingCompletedEvent
+
+- Tool execution events:
+  - ToolCallStartingEvent
+  - ToolValidationFailedEvent
+  - ToolCallFailedEvent
+  - ToolCallCompletedEvent
+
+These events are emitted by the agents-core runtime and consumed by features such as Tracing, Debugger, and EventHandler to enable logging, tracing, monitoring, and remote inspection.

@@ -1,19 +1,66 @@
-_# Predefined nodes and components
+# Predefined nodes and components
 
 Nodes are the fundamental building blocks of agent workflows in the Koog framework.
 Each node represents a specific operation or transformation in the workflow, and they can be connected using edges to define the flow of execution.
 
-In general, they let you encapsulate complex logic into reusable components that can be easily integrated into
+In general, nodes let you encapsulate complex logic into reusable components that can be easily integrated into
 different agent workflows. This guide will walk you through the existing nodes that can be used in your agent
 strategies.
 
-For more detailed reference documentation, see [API reference](https://api.koog.ai/index.html).
+Each node is essentially a function that takes an input of a specific type and returns an output of a specific type.
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["node"]
+        execute(Do stuff)
+    end
+    
+    in --Input--> execute --Output--> out
+
+    classDef hidden display: none;
+```
+
+Here is how you can define a node that expects a string as input and returns the length of the string (an integer) as output:
+
+<!--- INCLUDE
+import ai.koog.agents.core.dsl.builder.strategy
+
+val strategy = strategy<String, String>("strategy_name") {
+-->
+<!--- SUFFIX
+}
+-->
+```kotlin
+val nodeLength by node<String, Int> { input ->
+    input.length
+}
+```
+<!--- KNIT example-nodes-and-component-01.kt -->
+
+For more information, see [`node()`](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.builder/-a-i-agent-subgraph-builder-base/node.html).
 
 ## Utility nodes
 
 ### nodeDoNothing
 
 A simple pass-through node that does nothing and returns the input as output. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-do-nothing.html).
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeDoNothing"]
+        execute(Do nothing)
+    end
+    
+    in ---|T| execute --T--> out
+
+    classDef hidden display: none;
+```
 
 You can use this node for the following purposes:
 
@@ -38,14 +85,28 @@ val passthrough by nodeDoNothing<String>("passthrough")
 edge(nodeStart forwardTo passthrough)
 edge(passthrough forwardTo nodeFinish)
 ```
-<!--- KNIT example-nodes-and-component-01.kt -->
+<!--- KNIT example-nodes-and-component-02.kt -->
 
 ## LLM nodes
 
-### nodeUpdatePrompt
+### nodeAppendPrompt
 
 A node that adds messages to the LLM prompt using the provided prompt builder.
 This is useful for modifying the conversation context before making an actual LLM request. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-update-prompt.html).
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeAppendPrompt"]
+        execute(Append prompt)
+    end
+    
+    in ---|T| execute --T--> out
+
+    classDef hidden display: none;
+```
 
 You can use this node for the following purposes:
 
@@ -58,7 +119,7 @@ Here is an example:
 <!--- INCLUDE
 import ai.koog.agents.core.dsl.builder.forwardTo
 import ai.koog.agents.core.dsl.builder.strategy
-import ai.koog.agents.core.dsl.extension.nodeUpdatePrompt
+import ai.koog.agents.core.dsl.extension.nodeAppendPrompt
 
 typealias Input = Unit
 typealias Output = Unit
@@ -78,7 +139,7 @@ val secondNode by node<Output, Output> {
 }
 
 // Node will get the value of type Output as input from the previous node and path through it to the next node
-val setupContext by nodeUpdatePrompt<Output>("setupContext") {
+val setupContext by nodeAppendPrompt<Output>("setupContext") {
     system("You are a helpful assistant specialized in Kotlin programming.")
     user("I need help with Kotlin coroutines.")
 }
@@ -86,20 +147,62 @@ val setupContext by nodeUpdatePrompt<Output>("setupContext") {
 edge(firstNode forwardTo setupContext)
 edge(setupContext forwardTo secondNode)
 ```
-<!--- KNIT example-nodes-and-component-02.kt -->
+<!--- KNIT example-nodes-and-component-03.kt -->
 
 ### nodeLLMSendMessageOnlyCallingTools
 
 A node that appends a user message to the LLM prompt and gets a response where the LLM can only call tools. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-l-l-m-send-message-only-calling-tools.html).
 
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeLLMSendMessageOnlyCallingTools"]
+        execute(Request LLM expecting only tool calls)
+    end
+    
+    in --String--> execute --Message.Response--> out
+
+    classDef hidden display: none;
+```
+
 ### nodeLLMSendMessageForceOneTool
 
 A node that that appends a user message to the LLM prompt and forces the LLM to use a specific tool. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-l-l-m-send-message-force-one-tool.html).
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeLLMSendMessageForceOneTool"]
+        execute(Request LLM expecting a specific tool call)
+    end
+    
+    in --String--> execute --Message.Response--> out
+
+    classDef hidden display: none;
+```
 
 ### nodeLLMRequest
 
 A node that appends a user message to the LLM prompt and gets a response with optional tool usage. The node configuration determines whether
 tool calls are allowed during the processing of the message. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-l-l-m-request.html).
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeLLMRequest"]
+        execute(Request LLM)
+    end
+    
+    in --String--> execute --Message.Response--> out
+
+    classDef hidden display: none;
+```
 
 You can use this node for the following purposes:
 
@@ -123,19 +226,61 @@ val strategy = strategy<String, String>("strategy_name") {
 val requestLLM by nodeLLMRequest("requestLLM", allowToolCalls = true)
 edge(getUserQuestion forwardTo requestLLM)
 ```
-<!--- KNIT example-nodes-and-component-03.kt -->
+<!--- KNIT example-nodes-and-component-04.kt -->
 
 ### nodeLLMRequestStructured
 
 A node that appends a user message to the LLM prompt and requests structured data from the LLM with error correction capabilities. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-l-l-m-request-structured.html).
 
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeLLMRequestStructured"]
+        execute(Request LLM structured)
+    end
+    
+    in --String--> execute -- "Result&lt;StructuredResponse&gt;" --> out
+
+    classDef hidden display: none;
+```
+
 ### nodeLLMRequestStreaming
 
 A node that appends a user message to the LLM prompt and streams LLM response with or without stream data transformation. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-l-l-m-request-streaming.html).
 
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeLLMRequestStreaming"]
+        execute(Request LLM streaming)
+    end
+    
+    in --String--> execute --Flow--> out
+
+    classDef hidden display: none;
+```
+
 ### nodeLLMRequestMultiple
 
 A node that appends a user message to the LLM prompt and gets multiple LLM responses with tool calls enabled. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-l-l-m-request-multiple.html).
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeLLMRequestMultiple"]
+        execute(Request LLM expecting multiple responses)
+    end
+    
+    in --String--> execute -- "List&lt;Message.Response&gt;" --> out
+
+    classDef hidden display: none;
+```
 
 You can use this node for the following purposes:
 
@@ -161,12 +306,26 @@ val strategy = strategy<String, String>("strategy_name") {
 val requestLLMMultipleTools by nodeLLMRequestMultiple()
 edge(getComplexUserQuestion forwardTo requestLLMMultipleTools)
 ```
-<!--- KNIT example-nodes-and-component-04.kt -->
+<!--- KNIT example-nodes-and-component-05.kt -->
 
 ### nodeLLMCompressHistory
 
 A node that compresses the current LLM prompt (message history) into a summary, replacing messages with a concise summary (TL;DR). For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-l-l-m-compress-history.html).
 This is useful for managing long conversations by compressing the history to reduce token usage.
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeLLMCompressHistory"]
+        execute(Compress current prompt)
+    end
+    
+    in ---|T| execute --T--> out
+
+    classDef hidden display: none;
+```
 
 To learn more about history compression, see [History compression](history-compression.md).
 
@@ -199,13 +358,27 @@ val compressHistory by nodeLLMCompressHistory<String>(
 )
 edge(generateHugeHistory forwardTo compressHistory)
 ```
-<!--- KNIT example-nodes-and-component-05.kt -->
+<!--- KNIT example-nodes-and-component-06.kt -->
 
 ## Tool nodes
 
 ### nodeExecuteTool
 
 A node that executes a single tool call and returns its result. This node is used to handle tool calls made by the LLM. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-execute-tool.html).
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeExecuteTool"]
+        execute(Execute tool call)
+    end
+    
+    in --Message.Tool.Call--> execute --ReceivedToolResult--> out
+
+    classDef hidden display: none;
+```
 
 You can use this node for the following purposes:
 
@@ -232,11 +405,25 @@ val requestLLM by nodeLLMRequest()
 val executeTool by nodeExecuteTool()
 edge(requestLLM forwardTo executeTool onToolCall { true })
 ```
-<!--- KNIT example-nodes-and-component-06.kt -->
+<!--- KNIT example-nodes-and-component-07.kt -->
 
 ### nodeLLMSendToolResult
 
 A node that adds a tool result to the prompt and requests an LLM response. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-l-l-m-send-tool-result.html).
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeLLMSendToolResult"]
+        execute(Request LLM)
+    end
+    
+    in --ReceivedToolResult--> execute --Message.Response--> out
+
+    classDef hidden display: none;
+```
 
 You can use this node for the following purposes:
 
@@ -262,11 +449,25 @@ val executeTool by nodeExecuteTool()
 val sendToolResultToLLM by nodeLLMSendToolResult()
 edge(executeTool forwardTo sendToolResultToLLM)
 ```
-<!--- KNIT example-nodes-and-component-07.kt -->
+<!--- KNIT example-nodes-and-component-08.kt -->
 
 ### nodeExecuteMultipleTools
 
 A node that executes multiple tool calls. These calls can optionally be executed in parallel. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-execute-multiple-tools.html).
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeExecuteMultipleTools"]
+        execute(Execute multiple tool calls)
+    end
+    
+    in -- "List&lt;Message.Tool.Call&gt;" --> execute -- "List&lt;ReceivedToolResult&gt;" --> out
+
+    classDef hidden display: none;
+```
 
 You can use this node for the following purposes:
 
@@ -293,11 +494,25 @@ val requestLLMMultipleTools by nodeLLMRequestMultiple()
 val executeMultipleTools by nodeExecuteMultipleTools()
 edge(requestLLMMultipleTools forwardTo executeMultipleTools onMultipleToolCalls { true })
 ```
-<!--- KNIT example-nodes-and-component-08.kt -->
+<!--- KNIT example-nodes-and-component-09.kt -->
 
 ### nodeLLMSendMultipleToolResults
 
 A node that adds multiple tool results to the prompt and gets multiple LLM responses. For details, see [API reference](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.extension/node-l-l-m-send-multiple-tool-results.html).
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph node ["nodeLLMSendMultipleToolResults"]
+        execute(Request LLM expecting multiple responses)
+    end
+    
+    in -- "List&lt;ReceivedToolResult&gt;" --> execute -- "List&lt;Message.Response&gt;" --> out
+
+    classDef hidden display: none;
+```
 
 You can use this node for the following purposes:
 
@@ -323,7 +538,96 @@ val executeMultipleTools by nodeExecuteMultipleTools()
 val sendMultipleToolResultsToLLM by nodeLLMSendMultipleToolResults()
 edge(executeMultipleTools forwardTo sendMultipleToolResultsToLLM)
 ```
-<!--- KNIT example-nodes-and-component-09.kt -->
+<!--- KNIT example-nodes-and-component-10.kt -->
+
+## Node output transformation
+
+The framework provides the `transform` extension function that allows you to create transformed versions of nodes 
+that apply transformations to their output. This is useful when you need to convert the output of a node 
+to a different type or format while preserving the original node's functionality.
+
+```mermaid
+graph LR
+    in:::hidden
+    out:::hidden
+    
+    subgraph nodeWithTransform [transformed node]
+        subgraph node ["node"]
+            execute(Do stuff)
+        end
+        transform
+    end
+    
+    in --Input--> execute --> transform --Output--> out
+
+    classDef hidden display: none;
+```
+
+### transform
+
+The [`transform()`](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.dsl.builder/-a-i-agent-node-delegate/transform.html) function creates a new `AIAgentNodeDelegate` that wraps the original node and applies a transformation function to its output.
+
+<!--- INCLUDE
+/**
+-->
+<!--- SUFFIX
+**/
+-->
+```kotlin
+inline fun <reified T> AIAgentNodeDelegate<Input, Output>.transform(
+    noinline transformation: suspend (Output) -> T
+): AIAgentNodeDelegate<Input, T>
+```
+<!--- KNIT example-nodes-and-component-11.kt -->
+
+#### Custom node transformation
+
+Transform the output of a custom node to a different data type:
+
+<!--- INCLUDE
+import ai.koog.agents.core.dsl.builder.forwardTo
+import ai.koog.agents.core.dsl.builder.strategy
+import ai.koog.agents.core.dsl.extension.nodeDoNothing
+
+val strategy = strategy<String, Int>("strategy_name") {
+-->
+<!--- SUFFIX
+}
+-->
+```kotlin
+val textNode by nodeDoNothing<String>("textNode").transform<Int> { text ->
+    text.split(" ").filter { it.isNotBlank() }.size
+}
+
+edge(nodeStart forwardTo textNode)
+edge(textNode forwardTo nodeFinish)
+```
+<!--- KNIT example-nodes-and-component-12.kt -->
+
+#### Built-in node transformation
+
+Transform the output of built-in nodes like `nodeLLMRequest`:
+
+<!--- INCLUDE
+import ai.koog.agents.core.dsl.builder.forwardTo
+import ai.koog.agents.core.dsl.builder.strategy
+import ai.koog.agents.core.dsl.extension.nodeLLMRequest
+
+val strategy = strategy<String, Int>("strategy_name") {
+-->
+<!--- SUFFIX
+}
+-->
+```kotlin
+val lengthNode by nodeLLMRequest("llmRequest").transform<Int> { assistantMessage ->
+    assistantMessage.content.length
+}
+
+edge(nodeStart forwardTo lengthNode)
+edge(lengthNode forwardTo nodeFinish)
+```
+<!--- KNIT example-nodes-and-component-13.kt -->
+
 
 ## Predefined subgraphs
 
@@ -337,7 +641,7 @@ By using the predefined subgraphs, you can implement various popular pipelines. 
 
 ### subgraphWithTask
 
-A subgraph that performs a specific task using provided tools and returns a structured result. This subgraph is designed to handle self-contained tasks within a larger workflow. For details, see [API reference](https://api.koog.ai/agents/agents-ext/ai.koog.agents.ext.agent/subgraph-with-task.html).
+A subgraph that performs a specific task using provided tools and returns a structured result. It supports multi-response LLM interactions (the assistant may produce several responses interleaved with tool calls) and lets you control how tool calls are executed. For details, see [API reference](https://api.koog.ai/agents/agents-ext/ai.koog.agents.ext.agent/subgraph-with-task.html).
 
 You can use this subgraph for the following purposes:
 
@@ -346,7 +650,12 @@ You can use this subgraph for the following purposes:
 - Configure task-specific tools, models, and prompts.
 - Manage conversation history with automatic compression.
 - Develop structured agent workflows and task execution pipelines.
-- Generate structured results from LLM task execution.
+- Generate structured results from LLM task execution, including flows with multiple assistant responses and tool invocations.
+
+The API allows you to fine‑tune execution with optional parameters:
+
+- runMode: controls how tool calls are executed during the task (sequential by default). Use this to switch between different tool execution strategies when supported by the underlying model/executor.
+- assistantResponseRepeatMax: limits how many assistant responses are allowed before concluding the task cannot be completed (defaults to a safe internal limit if not provided).
 
 You can provide a task to the subgraph as text, configure the LLM if needed, and provide the necessary tools, and the subgraph will process and solve the task. Here is an example:
 
@@ -355,6 +664,7 @@ import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.ext.tool.SayToUser
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.agents.ext.agent.subgraphWithTask
+import ai.koog.agents.core.agent.ToolCalls
 
 val searchTool = SayToUser
 val calculatorTool = SayToUser
@@ -366,9 +676,11 @@ val strategy = strategy<String, String>("strategy_name") {
 }
 -->
 ```kotlin
-val processQuery by subgraphWithTask<String>(
+val processQuery by subgraphWithTask<String, String>(
     tools = listOf(searchTool, calculatorTool, weatherTool),
     llmModel = OpenAIModels.Chat.GPT4o,
+    runMode = ToolCalls.SEQUENTIAL,
+    assistantResponseRepeatMax = 3,
 ) { userQuery ->
     """
     You are a helpful assistant that can answer questions about various topics.
@@ -377,7 +689,7 @@ val processQuery by subgraphWithTask<String>(
     """
 }
 ```
-<!--- KNIT example-nodes-and-component-10.kt -->
+<!--- KNIT example-nodes-and-component-14.kt -->
 
 ### subgraphWithVerification
 
@@ -390,7 +702,7 @@ You can use this subgraph for the following purposes:
 - Create self-validating components.
 - Generate structured verification results with success/failure status and detailed feedback.
 
-The subgraph ensures that the LLM calls a verification tool at the end of the workflow to check whether the task was successfully completed. It guarantees this verification is performed as the final step and returns a `VerifiedSubgraphResult` that indicates whether a task was completed successfully and provides detailed feedback. 
+The subgraph ensures that the LLM calls a verification tool at the end of the workflow to check whether the task was successfully completed. It guarantees this verification is performed as the final step and returns a `CriticResult` that indicates whether a task was completed successfully and provides detailed feedback.
 Here is an example:
 
 <!--- INCLUDE
@@ -398,6 +710,7 @@ import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.ext.tool.SayToUser
 import ai.koog.prompt.executor.clients.anthropic.AnthropicModels
 import ai.koog.agents.ext.agent.subgraphWithVerification
+import ai.koog.agents.core.agent.ToolCalls
 
 val runTestsTool = SayToUser
 val analyzeTool = SayToUser
@@ -411,7 +724,9 @@ val strategy = strategy<String, String>("strategy_name") {
 ```kotlin
 val verifyCode by subgraphWithVerification<String>(
     tools = listOf(runTestsTool, analyzeTool, readFileTool),
-    llmModel = AnthropicModels.Sonnet_3_7
+    llmModel = AnthropicModels.Sonnet_3_7,
+    runMode = ToolCalls.SEQUENTIAL,
+    assistantResponseRepeatMax = 3,
 ) { codeToVerify ->
     """
     You are a code reviewer. Please verify that the following code meets all requirements:
@@ -424,7 +739,7 @@ val verifyCode by subgraphWithVerification<String>(
     """
 }
 ```
-<!--- KNIT example-nodes-and-component-11.kt -->
+<!--- KNIT example-nodes-and-component-15.kt -->
 
 ## Predefined strategies and common strategy patterns
 
@@ -462,7 +777,7 @@ public fun singleRunStrategy(): AIAgentGraphStrategy<String, String> = strategy(
     edge(nodeSendToolResult forwardTo nodeExecuteTool onToolCall { true })
 }
 ```
-<!--- KNIT example-nodes-and-component-12.kt -->
+<!--- KNIT example-nodes-and-component-16.kt -->
 
 ### Tool-based strategy
 
@@ -516,7 +831,7 @@ fun toolBasedStrategy(name: String, toolRegistry: ToolRegistry): AIAgentGraphStr
     }
 }
 ```
-<!--- KNIT example-nodes-and-component-13.kt -->
+<!--- KNIT example-nodes-and-component-17.kt -->
 
 ### Streaming data strategy
 
@@ -538,8 +853,8 @@ val agentStrategy = strategy<String, List<Book>>("library-assistant") {
         val books = mutableListOf<Book>()
         val mdDefinition = markdownBookDefinition()
 
-        llm.writeSession {
-            updatePrompt { user(booksDescription) }
+        llm.writeSession { 
+            appendPrompt { user(booksDescription) }
             // Initiate the response stream in the form of the definition `mdDefinition`
             val markdownStream = requestLLMStreaming(mdDefinition)
             // Call the parser with the result of the response stream and perform actions with the result
@@ -556,4 +871,4 @@ val agentStrategy = strategy<String, List<Book>>("library-assistant") {
     edge(getMdOutput forwardTo nodeFinish)
 }
 ```
-<!--- KNIT example-nodes-and-component-14.kt -->
+<!--- KNIT example-nodes-and-component-18.kt -->

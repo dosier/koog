@@ -1,5 +1,6 @@
 package ai.koog.agents.features.tracing.writer
 
+import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.core.dsl.builder.forwardTo
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.dsl.extension.nodeExecuteTool
@@ -7,39 +8,40 @@ import ai.koog.agents.core.dsl.extension.nodeLLMRequest
 import ai.koog.agents.core.dsl.extension.nodeLLMSendToolResult
 import ai.koog.agents.core.dsl.extension.onAssistantMessage
 import ai.koog.agents.core.dsl.extension.onToolCall
+import ai.koog.agents.core.environment.ReceivedToolResult
 import ai.koog.agents.core.feature.message.FeatureEvent
 import ai.koog.agents.core.feature.message.FeatureMessage
 import ai.koog.agents.core.feature.model.FeatureStringMessage
-import ai.koog.agents.core.feature.model.events.AIAgentBeforeCloseEvent
-import ai.koog.agents.core.feature.model.events.AIAgentFinishedEvent
-import ai.koog.agents.core.feature.model.events.AIAgentGraphStrategyStartEvent
-import ai.koog.agents.core.feature.model.events.AIAgentNodeExecutionEndEvent
-import ai.koog.agents.core.feature.model.events.AIAgentNodeExecutionStartEvent
-import ai.koog.agents.core.feature.model.events.AIAgentStartedEvent
-import ai.koog.agents.core.feature.model.events.AIAgentStrategyFinishedEvent
-import ai.koog.agents.core.feature.model.events.AIAgentStrategyStartEvent
-import ai.koog.agents.core.feature.model.events.AfterLLMCallEvent
-import ai.koog.agents.core.feature.model.events.BeforeLLMCallEvent
-import ai.koog.agents.core.feature.model.events.ToolCallEvent
-import ai.koog.agents.core.feature.model.events.ToolCallResultEvent
+import ai.koog.agents.core.feature.model.events.AgentClosingEvent
+import ai.koog.agents.core.feature.model.events.AgentCompletedEvent
+import ai.koog.agents.core.feature.model.events.AgentStartingEvent
+import ai.koog.agents.core.feature.model.events.GraphStrategyStartingEvent
+import ai.koog.agents.core.feature.model.events.LLMCallCompletedEvent
+import ai.koog.agents.core.feature.model.events.LLMCallStartingEvent
+import ai.koog.agents.core.feature.model.events.NodeExecutionCompletedEvent
+import ai.koog.agents.core.feature.model.events.NodeExecutionStartingEvent
+import ai.koog.agents.core.feature.model.events.StrategyCompletedEvent
+import ai.koog.agents.core.feature.model.events.ToolCallCompletedEvent
+import ai.koog.agents.core.feature.model.events.ToolCallStartingEvent
 import ai.koog.agents.core.tools.ToolRegistry
-import ai.koog.agents.features.tracing.eventString
+import ai.koog.agents.core.utils.SerializationUtils
 import ai.koog.agents.features.tracing.feature.Tracing
 import ai.koog.agents.features.tracing.mock.MockLLMProvider
 import ai.koog.agents.features.tracing.mock.assistantMessage
 import ai.koog.agents.features.tracing.mock.createAgent
+import ai.koog.agents.features.tracing.mock.receivedToolResult
 import ai.koog.agents.features.tracing.mock.systemMessage
 import ai.koog.agents.features.tracing.mock.testClock
 import ai.koog.agents.features.tracing.mock.toolCallMessage
-import ai.koog.agents.features.tracing.mock.toolResult
 import ai.koog.agents.features.tracing.mock.userMessage
 import ai.koog.agents.features.tracing.traceString
 import ai.koog.agents.testing.tools.DummyTool
 import ai.koog.agents.testing.tools.getMockExecutor
-import ai.koog.agents.testing.tools.mockLLMAnswer
-import ai.koog.agents.utils.use
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.llm.toModelInfo
+import ai.koog.prompt.message.Message
+import ai.koog.utils.io.use
 import kotlinx.coroutines.test.runTest
 import kotlinx.io.Sink
 import kotlinx.io.buffered
@@ -50,6 +52,7 @@ import java.nio.file.Path
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.pathString
 import kotlin.io.path.readLines
+import kotlin.reflect.typeOf
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -123,8 +126,12 @@ class TraceFeatureMessageFileWriterTest {
             }
 
             val mockExecutor = getMockExecutor(clock = testClock) {
-                mockLLMToolCall(tool = dummyTool, args = DummyTool.Args("test"), toolCallId = "0") onRequestEquals
-                    userPrompt
+                mockLLMToolCall(
+                    tool = dummyTool,
+                    args = DummyTool.Args("test"),
+                    toolCallId = "0"
+                ) onRequestEquals userPrompt
+
                 mockLLMAnswer(mockResponse) onRequestContains dummyTool.result
             }
 
@@ -142,8 +149,8 @@ class TraceFeatureMessageFileWriterTest {
                 promptExecutor = mockExecutor
             ) {
                 install(Tracing) {
-                    messageFilter = { message ->
-                        if (message is AIAgentStartedEvent) {
+                    writer.setMessageFilter { message ->
+                        if (message is AgentStartingEvent) {
                             runId = message.runId
                         }
                         true
@@ -154,95 +161,137 @@ class TraceFeatureMessageFileWriterTest {
                 agent.run(userPrompt)
             }
 
+            val dummyToolArgsEncoded = dummyTool.encodeArgs(DummyTool.Args("test"))
+            val dummyToolResultEncoded = dummyTool.encodeResult(dummyTool.result)
+            val dummyToolName = dummyTool.name
+            val dummyToolDescription = dummyTool.descriptor.description
+
+            val dummyReceivedToolResultEncoded = @OptIn(InternalAgentsApi::class)
+            SerializationUtils.encodeDataToJsonElementOrNull(
+                data = receivedToolResult(
+                    toolCallId = "0",
+                    toolName = dummyToolName,
+                    toolArgs = dummyTool.encodeArgs(DummyTool.Args("test")),
+                    toolDescription = dummyToolDescription,
+                    content = dummyTool.result,
+                    result = dummyToolResultEncoded,
+                ),
+                dataType = typeOf<ReceivedToolResult>()
+            )
+
             val expectedMessages = listOf(
-                "${AIAgentStartedEvent::class.simpleName} (agent id: $agentId, run id: $runId)",
-                "${AIAgentStrategyStartEvent::class.simpleName} (run id: $runId, strategy: $strategyName)",
-                "${AIAgentNodeExecutionStartEvent::class.simpleName} (run id: $runId, node: __start__, input: $userPrompt)",
-                "${AIAgentNodeExecutionEndEvent::class.simpleName} (run id: $runId, node: __start__, input: $userPrompt, output: $userPrompt)",
-                "${AIAgentNodeExecutionStartEvent::class.simpleName} (run id: $runId, node: test-llm-call, input: $userPrompt)",
-                "${BeforeLLMCallEvent::class.simpleName} (run id: $runId, prompt: ${
+                "${AgentStartingEvent::class.simpleName} (agent id: $agentId, run id: $runId)",
+                "${GraphStrategyStartingEvent::class.simpleName} (run id: $runId, strategy: $strategyName)",
+                "${NodeExecutionStartingEvent::class.simpleName} (run id: $runId, node: __start__, " +
+                    "input: \"$userPrompt\"" +
+                    ")",
+                "${NodeExecutionCompletedEvent::class.simpleName} (run id: $runId, node: __start__, " +
+                    "input: \"$userPrompt\", " +
+                    "output: \"$userPrompt\"" +
+                    ")",
+                "${NodeExecutionStartingEvent::class.simpleName} (run id: $runId, node: test-llm-call, " +
+                    "input: \"$userPrompt\"" +
+                    ")",
+                "${LLMCallStartingEvent::class.simpleName} (run id: $runId, prompt: ${
                     expectedPrompt.copy(
                         messages = expectedPrompt.messages + userMessage(
                             content = userPrompt
                         )
                     ).traceString
-                }, model: ${testModel.eventString}, tools: [${dummyTool.name}])",
-                "${AfterLLMCallEvent::class.simpleName} (run id: $runId, prompt: ${
+                }, model: ${testModel.toModelInfo().modelIdentifierName}, tools: [$dummyToolName])",
+                "${LLMCallCompletedEvent::class.simpleName} (run id: $runId, prompt: ${
                     expectedPrompt.copy(
                         messages = expectedPrompt.messages + userMessage(
                             content = userPrompt
                         )
                     ).traceString
-                }, model: ${testModel.eventString}, responses: [{role: Tool, message: {\"dummy\":\"test\"}}])",
-                "${AIAgentNodeExecutionEndEvent::class.simpleName} (run id: $runId, node: test-llm-call, input: $userPrompt, output: ${
-                    toolCallMessage(
-                        dummyTool.name,
-                        content = """{"dummy":"test"}"""
-                    )
-                })",
-                "${AIAgentNodeExecutionStartEvent::class.simpleName} (run id: $runId, node: test-tool-call, input: ${
-                    toolCallMessage(
-                        dummyTool.name,
-                        content = """{"dummy":"test"}"""
-                    )
-                })",
-                "${ToolCallEvent::class.simpleName} (run id: $runId, tool: ${dummyTool.name}, tool args: {\"dummy\":\"test\"})",
-                "${ToolCallResultEvent::class.simpleName} (run id: $runId, tool: ${dummyTool.name}, tool args: {\"dummy\":\"test\"}, result: ${dummyTool.result})",
-                "${AIAgentNodeExecutionEndEvent::class.simpleName} (run id: $runId, node: test-tool-call, input: ${
-                    toolCallMessage(
-                        dummyTool.name,
-                        content = """{"dummy":"test"}"""
-                    )
-                }, output: ${toolResult("0", dummyTool.name, dummyTool.result, dummyTool.result)})",
-                "${AIAgentNodeExecutionStartEvent::class.simpleName} (run id: $runId, node: test-node-llm-send-tool-result, input: ${
-                    toolResult(
-                        "0",
-                        dummyTool.name,
-                        dummyTool.result,
-                        dummyTool.result
-                    )
-                })",
-                "${BeforeLLMCallEvent::class.simpleName} (run id: $runId, prompt: ${
+                }, model: ${testModel.toModelInfo().modelIdentifierName}, responses: [{role: Tool, message: $dummyToolArgsEncoded}])",
+                "${NodeExecutionCompletedEvent::class.simpleName} (run id: $runId, node: test-llm-call, " +
+                    "input: \"$userPrompt\", " +
+                    "output: ${
+                        @OptIn(InternalAgentsApi::class)
+                        SerializationUtils.encodeDataToJsonElementOrNull(
+                            data = toolCallMessage(
+                                toolName = dummyToolName,
+                                content = dummyToolArgsEncoded.toString()
+                            ),
+                            dataType = typeOf<Message>()
+                        )}" +
+                    ")",
+                "${NodeExecutionStartingEvent::class.simpleName} (run id: $runId, node: test-tool-call, " +
+                    "input: ${
+                        @OptIn(InternalAgentsApi::class)
+                        SerializationUtils.encodeDataToJsonElementOrNull(
+                            data = toolCallMessage(
+                                toolName = dummyToolName,
+                                content = dummyToolArgsEncoded.toString()
+                            ),
+                            dataType = typeOf<Message.Tool.Call>()
+                        )}" +
+                    ")",
+                "${ToolCallStartingEvent::class.simpleName} (run id: $runId, tool: $dummyToolName, tool args: $dummyToolArgsEncoded)",
+                "${ToolCallCompletedEvent::class.simpleName} (run id: $runId, tool: $dummyToolName, tool args: $dummyToolArgsEncoded, description: $dummyToolDescription, result: $dummyToolResultEncoded)",
+                "${NodeExecutionCompletedEvent::class.simpleName} (run id: $runId, node: test-tool-call, " +
+                    "input: ${
+                        @OptIn(InternalAgentsApi::class)
+                        SerializationUtils.encodeDataToJsonElementOrNull(
+                            data = toolCallMessage(
+                                toolName = dummyToolName,
+                                content = dummyToolArgsEncoded.toString()
+                            ),
+                            dataType = typeOf<Message.Tool.Call>()
+                        )}, " +
+                    "output: $dummyReceivedToolResultEncoded)",
+                "${NodeExecutionStartingEvent::class.simpleName} (" +
+                    "run id: $runId, " +
+                    "node: test-node-llm-send-tool-result, " +
+                    "input: $dummyReceivedToolResultEncoded)",
+                "${LLMCallStartingEvent::class.simpleName} (run id: $runId, prompt: ${
                     expectedPrompt.copy(
                         messages = expectedPrompt.messages + listOf(
                             userMessage(content = userPrompt),
-                            toolCallMessage(dummyTool.name, content = """{"dummy":"test"}"""),
-                            toolResult(
-                                "0",
-                                dummyTool.name,
-                                dummyTool.result,
-                                dummyTool.result
+                            toolCallMessage(dummyToolName, content = dummyToolArgsEncoded.toString()),
+                            receivedToolResult(
+                                toolCallId = "0",
+                                toolName = dummyToolName,
+                                toolArgs = dummyTool.encodeArgs(DummyTool.Args("test")),
+                                toolDescription = dummyToolDescription,
+                                content = dummyTool.result,
+                                result = dummyToolResultEncoded,
                             ).toMessage(clock = testClock)
                         )
                     ).traceString
-                }, model: ${testModel.eventString}, tools: [${dummyTool.name}])",
-                "${AfterLLMCallEvent::class.simpleName} (run id: $runId, prompt: ${
+                }, model: ${testModel.toModelInfo().modelIdentifierName}, tools: [$dummyToolName])",
+                "${LLMCallCompletedEvent::class.simpleName} (run id: $runId, prompt: ${
                     expectedPrompt.copy(
                         messages = expectedPrompt.messages + listOf(
                             userMessage(content = userPrompt),
-                            toolCallMessage(dummyTool.name, content = """{"dummy":"test"}"""),
-                            toolResult(
-                                "0",
-                                dummyTool.name,
-                                dummyTool.result,
-                                dummyTool.result
+                            toolCallMessage(dummyToolName, content = dummyToolArgsEncoded.toString()),
+                            receivedToolResult(
+                                toolCallId = "0",
+                                toolName = dummyToolName,
+                                toolArgs = dummyTool.encodeArgs(DummyTool.Args("test")),
+                                toolDescription = dummyToolDescription,
+                                content = dummyTool.result,
+                                result = dummyToolResultEncoded,
                             ).toMessage(clock = testClock)
                         )
                     ).traceString
-                }, model: ${testModel.eventString}, responses: [{${expectedResponse.traceString}}])",
-                "${AIAgentNodeExecutionEndEvent::class.simpleName} (run id: $runId, node: test-node-llm-send-tool-result, input: ${
-                    toolResult(
-                        "0",
-                        dummyTool.name,
-                        dummyTool.result,
-                        dummyTool.result
-                    )
-                }, output: $expectedResponse)",
-                "${AIAgentNodeExecutionStartEvent::class.simpleName} (run id: $runId, node: __finish__, input: $mockResponse)",
-                "${AIAgentNodeExecutionEndEvent::class.simpleName} (run id: $runId, node: __finish__, input: $mockResponse, output: $mockResponse)",
-                "${AIAgentStrategyFinishedEvent::class.simpleName} (run id: $runId, strategy: $strategyName, result: $mockResponse)",
-                "${AIAgentFinishedEvent::class.simpleName} (agent id: $agentId, run id: $runId, result: $mockResponse)",
-                "${AIAgentBeforeCloseEvent::class.simpleName} (agent id: $agentId)",
+                }, model: ${testModel.toModelInfo().modelIdentifierName}, responses: [{${expectedResponse.traceString}}])",
+                "${NodeExecutionCompletedEvent::class.simpleName} (run id: $runId, node: test-node-llm-send-tool-result, " +
+                    "input: $dummyReceivedToolResultEncoded, " +
+                    "output: ${
+                        @OptIn(InternalAgentsApi::class)
+                        SerializationUtils.encodeDataToJsonElementOrNull(
+                            data = expectedResponse,
+                            dataType = typeOf<Message>()
+                        )}" +
+                    ")",
+                "${NodeExecutionStartingEvent::class.simpleName} (run id: $runId, node: __finish__, input: \"$mockResponse\")",
+                "${NodeExecutionCompletedEvent::class.simpleName} (run id: $runId, node: __finish__, input: \"$mockResponse\", output: \"$mockResponse\")",
+                "${StrategyCompletedEvent::class.simpleName} (run id: $runId, strategy: $strategyName, result: $mockResponse)",
+                "${AgentCompletedEvent::class.simpleName} (agent id: $agentId, run id: $runId, result: $mockResponse)",
+                "${AgentClosingEvent::class.simpleName} (agent id: $agentId)",
             )
 
             val actualMessages = writer.targetPath.readLines()
@@ -259,7 +308,7 @@ class TraceFeatureMessageFileWriterTest {
         val customFormat: (FeatureMessage) -> String = { message ->
             when (message) {
                 is FeatureStringMessage -> "CUSTOM STRING. ${message.message}"
-                is FeatureEvent -> "CUSTOM EVENT. ${message.eventId}"
+                is FeatureEvent -> "CUSTOM EVENT. No event message"
                 else -> "CUSTOM OTHER: ${message::class.simpleName}"
             }
         }
@@ -269,12 +318,12 @@ class TraceFeatureMessageFileWriterTest {
 
         val messagesToProcess = listOf(
             FeatureStringMessage("Test string message"),
-            AIAgentStartedEvent(agentId = agentId, runId = runId)
+            AgentStartingEvent(agentId = agentId, runId = runId)
         )
 
         val expectedMessages = listOf(
             "CUSTOM STRING. Test string message",
-            "CUSTOM EVENT. ${AIAgentStartedEvent::class.simpleName}",
+            "CUSTOM EVENT. No event message",
         )
 
         TraceFeatureMessageFileWriter(
@@ -284,7 +333,7 @@ class TraceFeatureMessageFileWriterTest {
         ).use { writer ->
             writer.initialize()
 
-            messagesToProcess.forEach { message -> writer.processMessage(message) }
+            messagesToProcess.forEach { message -> writer.onMessage(message) }
 
             val actualMessage = writer.targetPath.readLines()
 
@@ -300,23 +349,23 @@ class TraceFeatureMessageFileWriterTest {
         }
 
         val expectedEvents = listOf(
-            "CUSTOM. ${AIAgentStartedEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentGraphStrategyStartEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentNodeExecutionStartEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentNodeExecutionEndEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentNodeExecutionStartEvent::class.simpleName}",
-            "CUSTOM. ${BeforeLLMCallEvent::class.simpleName}",
-            "CUSTOM. ${AfterLLMCallEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentNodeExecutionEndEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentNodeExecutionStartEvent::class.simpleName}",
-            "CUSTOM. ${BeforeLLMCallEvent::class.simpleName}",
-            "CUSTOM. ${AfterLLMCallEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentNodeExecutionEndEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentNodeExecutionStartEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentNodeExecutionEndEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentStrategyFinishedEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentFinishedEvent::class.simpleName}",
-            "CUSTOM. ${AIAgentBeforeCloseEvent::class.simpleName}",
+            "CUSTOM. ${AgentStartingEvent::class.simpleName}",
+            "CUSTOM. ${GraphStrategyStartingEvent::class.simpleName}",
+            "CUSTOM. ${NodeExecutionStartingEvent::class.simpleName}",
+            "CUSTOM. ${NodeExecutionCompletedEvent::class.simpleName}",
+            "CUSTOM. ${NodeExecutionStartingEvent::class.simpleName}",
+            "CUSTOM. ${LLMCallStartingEvent::class.simpleName}",
+            "CUSTOM. ${LLMCallCompletedEvent::class.simpleName}",
+            "CUSTOM. ${NodeExecutionCompletedEvent::class.simpleName}",
+            "CUSTOM. ${NodeExecutionStartingEvent::class.simpleName}",
+            "CUSTOM. ${LLMCallStartingEvent::class.simpleName}",
+            "CUSTOM. ${LLMCallCompletedEvent::class.simpleName}",
+            "CUSTOM. ${NodeExecutionCompletedEvent::class.simpleName}",
+            "CUSTOM. ${NodeExecutionStartingEvent::class.simpleName}",
+            "CUSTOM. ${NodeExecutionCompletedEvent::class.simpleName}",
+            "CUSTOM. ${StrategyCompletedEvent::class.simpleName}",
+            "CUSTOM. ${AgentCompletedEvent::class.simpleName}",
+            "CUSTOM. ${AgentClosingEvent::class.simpleName}",
         )
 
         TraceFeatureMessageFileWriter(
@@ -337,7 +386,6 @@ class TraceFeatureMessageFileWriterTest {
 
             val agent = createAgent(strategy = strategy) {
                 install(Tracing) {
-                    messageFilter = { true }
                     addMessageProcessor(writer)
                 }
             }
@@ -368,9 +416,7 @@ class TraceFeatureMessageFileWriterTest {
             }
 
             val agent = createAgent(strategy = strategy) {
-                install(Tracing) {
-                    messageFilter = { true }
-                }
+                install(Tracing)
             }
 
             agent.run("")
@@ -462,11 +508,11 @@ class TraceFeatureMessageFileWriterTest {
                 promptExecutor = mockExecutor
             ) {
                 install(Tracing) {
-                    messageFilter = { message ->
-                        if (message is AIAgentStartedEvent) {
+                    writer.setMessageFilter { message ->
+                        if (message is AgentStartingEvent) {
                             runId = message.runId
                         }
-                        message is BeforeLLMCallEvent || message is AfterLLMCallEvent
+                        message is LLMCallStartingEvent || message is LLMCallCompletedEvent
                     }
                     addMessageProcessor(writer)
                 }
@@ -474,49 +520,58 @@ class TraceFeatureMessageFileWriterTest {
                 agent.run(userPrompt)
             }
 
+            val dummyToolArgsEncoded = dummyTool.encodeArgs(DummyTool.Args("test"))
+            val dummyToolResultEncoded = dummyTool.encodeResult(dummyTool.result)
+            val dummyToolName = dummyTool.name
+            val dummyToolDescription = dummyTool.descriptor.description
+
             val expectedMessages = listOf(
-                "${BeforeLLMCallEvent::class.simpleName} (run id: $runId, prompt: ${
+                "${LLMCallStartingEvent::class.simpleName} (run id: $runId, prompt: ${
                     expectedPrompt.copy(
                         messages = expectedPrompt.messages + userMessage(
                             content = userPrompt
                         )
                     ).traceString
-                }, model: ${testModel.eventString}, tools: [${dummyTool.name}])",
-                "${AfterLLMCallEvent::class.simpleName} (run id: $runId, prompt: ${
+                }, model: ${testModel.toModelInfo().modelIdentifierName}, tools: [$dummyToolName])",
+                "${LLMCallCompletedEvent::class.simpleName} (run id: $runId, prompt: ${
                     expectedPrompt.copy(
                         messages = expectedPrompt.messages + userMessage(
                             content = userPrompt
                         )
                     ).traceString
-                }, model: ${testModel.eventString}, responses: [{role: Tool, message: {\"dummy\":\"test\"}}])",
-                "${BeforeLLMCallEvent::class.simpleName} (run id: $runId, prompt: ${
+                }, model: ${testModel.toModelInfo().modelIdentifierName}, responses: [{role: ${Message.Role.Tool.name}, message: $dummyToolArgsEncoded}])",
+                "${LLMCallStartingEvent::class.simpleName} (run id: $runId, prompt: ${
                     expectedPrompt.copy(
                         messages = expectedPrompt.messages + listOf(
                             userMessage(content = userPrompt),
-                            toolCallMessage(dummyTool.name, content = """{"dummy":"test"}"""),
-                            toolResult(
-                                "0",
-                                dummyTool.name,
-                                dummyTool.result,
-                                dummyTool.result
+                            toolCallMessage(dummyToolName, content = dummyToolArgsEncoded.toString()),
+                            receivedToolResult(
+                                toolCallId = "0",
+                                toolName = dummyToolName,
+                                toolArgs = dummyTool.encodeArgs(DummyTool.Args("test")),
+                                toolDescription = dummyToolDescription,
+                                content = dummyTool.result,
+                                result = dummyToolResultEncoded,
                             ).toMessage(clock = testClock)
                         )
                     ).traceString
-                }, model: ${testModel.eventString}, tools: [${dummyTool.name}])",
-                "${AfterLLMCallEvent::class.simpleName} (run id: $runId, prompt: ${
+                }, model: ${testModel.toModelInfo().modelIdentifierName}, tools: [$dummyToolName])",
+                "${LLMCallCompletedEvent::class.simpleName} (run id: $runId, prompt: ${
                     expectedPrompt.copy(
                         messages = expectedPrompt.messages + listOf(
                             userMessage(content = userPrompt),
-                            toolCallMessage(dummyTool.name, content = """{"dummy":"test"}"""),
-                            toolResult(
-                                "0",
-                                dummyTool.name,
-                                dummyTool.result,
-                                dummyTool.result
+                            toolCallMessage(dummyToolName, content = dummyToolArgsEncoded.toString()),
+                            receivedToolResult(
+                                toolCallId = "0",
+                                toolName = dummyToolName,
+                                toolArgs = dummyTool.encodeArgs(DummyTool.Args("test")),
+                                toolDescription = dummyToolDescription,
+                                content = dummyTool.result,
+                                result = dummyToolResultEncoded,
                             ).toMessage(clock = testClock)
                         )
                     ).traceString
-                }, model: ${testModel.eventString}, responses: [{${expectedResponse.traceString}}])",
+                }, model: ${testModel.toModelInfo().modelIdentifierName}, responses: [{${expectedResponse.traceString}}])",
             )
 
             val actualMessages = writer.targetPath.readLines()

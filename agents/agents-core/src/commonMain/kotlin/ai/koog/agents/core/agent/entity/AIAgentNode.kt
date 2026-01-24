@@ -1,10 +1,10 @@
 package ai.koog.agents.core.agent.entity
 
 import ai.koog.agents.core.agent.context.AIAgentGraphContextBase
-import ai.koog.agents.core.agent.context.element.NodeInfoContextElement
+import ai.koog.agents.core.agent.context.with
 import ai.koog.agents.core.annotation.InternalAgentsApi
 import io.github.oshai.kotlinlogging.KotlinLogging
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import kotlin.reflect.KType
 import kotlin.uuid.ExperimentalUuidApi
 
@@ -112,14 +112,13 @@ public abstract class AIAgentNodeBase<TInput, TOutput> internal constructor() {
      *
      * @param context The execution context that provides necessary runtime information and functionality.
      * @param input The input data required to perform the execution.
-     * @return The result of the execution as an Output object.
+     * @return The result of the execution as [TOutput] object.
      */
     public abstract suspend fun execute(context: AIAgentGraphContextBase, input: TInput): TOutput?
 
     /**
      * Executes the node operation using the provided execution context and input, bypassing type safety checks.
      * This method internally calls the type-safe `execute` method after casting the input.
-     * The lifecycle hooks `onBeforeNode` and `onAfterNode` are invoked before and after the execution respectively.
      *
      * @param context The execution context that provides runtime information and functionality.
      * @param input The input data to be processed by the node, which may be of any type.
@@ -152,22 +151,27 @@ public open class AIAgentNode<TInput, TOutput> internal constructor(
     }
 
     @InternalAgentsApi
+    @OptIn(ExperimentalUuidApi::class)
     override suspend fun execute(context: AIAgentGraphContextBase, input: TInput): TOutput =
-        withContext(NodeInfoContextElement(nodeName = name)) {
+        context.with(id) { executionInfo, eventId ->
             logger.debug { "Start executing node (name: $name)" }
-            context.pipeline.onBeforeNode(this@AIAgentNode, context, input, inputType)
+            context.pipeline.onNodeExecutionStarting(eventId, executionInfo, this@AIAgentNode, context, input, inputType)
 
-            try {
-                val output = context.execute(input)
-                logger.debug { "Finished executing node (name: $name) with output: $output" }
+            val output =
+                try {
+                    val executeResult = context.execute(input)
+                    logger.trace { "Finished executing node (name: $name) with output: $executeResult" }
+                    executeResult
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.error(e) { "Error executing node (name: $name): ${e.message}" }
+                    context.pipeline.onNodeExecutionFailed(eventId, executionInfo, this@AIAgentNode, context, input, inputType, e)
+                    throw e
+                }
 
-                context.pipeline.onAfterNode(this@AIAgentNode, context, input, output, inputType, outputType)
-                return@withContext output
-            } catch (t: Throwable) {
-                logger.error(t) { "Error executing node (name: $name): ${t.message}" }
-                context.pipeline.onNodeExecutionError(this@AIAgentNode, context, t)
-                throw t
-            }
+            context.pipeline.onNodeExecutionCompleted(eventId, executionInfo, this@AIAgentNode, context, input, inputType, output, outputType)
+            output
         }
 }
 
@@ -190,7 +194,7 @@ public class StartNode<TInput> internal constructor(
     subgraphName: String? = null,
     type: KType,
 ) : AIAgentNode<TInput, TInput>(
-    name = subgraphName?.let { "__start__$it" } ?: "__start__",
+    name = subgraphName?.let { "${AIAgentSubgraph.START_NODE_PREFIX}$it" } ?: AIAgentSubgraph.START_NODE_PREFIX,
     inputType = type,
     outputType = type,
     execute = { input -> input }
@@ -216,7 +220,7 @@ public class FinishNode<TOutput> internal constructor(
     subgraphName: String? = null,
     type: KType,
 ) : AIAgentNode<TOutput, TOutput>(
-    name = subgraphName?.let { "__finish__$it" } ?: "__finish__",
+    name = subgraphName?.let { "${AIAgentSubgraph.FINISH_NODE_PREFIX}$it" } ?: AIAgentSubgraph.FINISH_NODE_PREFIX,
     inputType = type,
     outputType = type,
     execute = { input -> input }

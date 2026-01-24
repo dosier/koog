@@ -11,20 +11,17 @@ kotlin {
     sourceSets {
         commonMain {
             dependencies {
-                api(project(":agents:agents-utils"))
+                api(project(":utils"))
                 api(project(":prompt:prompt-executor:prompt-executor-clients"))
+                api(project(":prompt:prompt-structure"))
+                api(project(":http-client:http-client-ktor"))
                 api(libs.ktor.client.content.negotiation)
                 api(libs.ktor.serialization.kotlinx.json)
                 implementation(libs.oshai.kotlin.logging)
             }
         }
-        jvmMain {
-            dependencies {
-                api(libs.ktor.client.cio)
-            }
-        }
 
-        jsMain {
+        jsTest {
             dependencies {
                 api(libs.ktor.client.js)
             }
@@ -32,16 +29,14 @@ kotlin {
 
         commonTest {
             dependencies {
-                implementation(kotlin("test"))
-                implementation(libs.kotlinx.coroutines.test)
-                implementation(libs.kotlinx.serialization.core)
-                implementation(libs.kotlinx.serialization.json)
+                implementation(project(":test-utils"))
             }
         }
 
         jvmTest {
             dependencies {
                 implementation(kotlin("test-junit5"))
+                implementation(libs.ktor.client.cio)
             }
         }
     }

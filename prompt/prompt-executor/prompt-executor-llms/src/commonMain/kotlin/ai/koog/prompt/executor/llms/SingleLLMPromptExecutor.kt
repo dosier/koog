@@ -4,9 +4,9 @@ import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.prompt.dsl.ModerationResult
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.executor.clients.LLMClient
-import ai.koog.prompt.executor.model.LLMChoice
 import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.streaming.StreamFrame
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -22,6 +22,10 @@ import kotlinx.coroutines.flow.Flow
  * @constructor Creates an instance of `LLMPromptExecutor`.
  * @param llmClient The client used for direct communication with the LLM provider.
  */
+@Deprecated(
+    "Please use MultiLLMPromptExecutor instead",
+    replaceWith = ReplaceWith("MultiLLMPromptExecutor", "ai.koog.prompt.executor.llms.MultiLLMPromptExecutor")
+)
 public open class SingleLLMPromptExecutor(
     private val llmClient: LLMClient,
 ) : PromptExecutor {
@@ -59,4 +63,10 @@ public open class SingleLLMPromptExecutor(
     }
 
     override suspend fun moderate(prompt: Prompt, model: LLModel): ModerationResult = llmClient.moderate(prompt, model)
+
+    override suspend fun models(): List<String> = llmClient.models()
+
+    override fun close() {
+        llmClient.close()
+    }
 }

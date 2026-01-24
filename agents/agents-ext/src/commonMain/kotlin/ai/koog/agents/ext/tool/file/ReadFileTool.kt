@@ -1,20 +1,15 @@
 package ai.koog.agents.ext.tool.file
 
 import ai.koog.agents.core.tools.Tool
-import ai.koog.agents.core.tools.ToolArgs
-import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.agents.core.tools.ToolException
-import ai.koog.agents.core.tools.ToolParameterDescriptor
-import ai.koog.agents.core.tools.ToolParameterType
-import ai.koog.agents.core.tools.ToolResult
+import ai.koog.agents.core.tools.annotations.LLMDescription
 import ai.koog.agents.core.tools.validate
 import ai.koog.agents.core.tools.validateNotNull
-import ai.koog.agents.ext.tool.file.model.FileSystemEntry
 import ai.koog.agents.ext.tool.file.render.file
 import ai.koog.prompt.text.text
 import ai.koog.rag.base.files.FileMetadata
 import ai.koog.rag.base.files.FileSystemProvider
-import kotlinx.serialization.KSerializer
+import ai.koog.rag.base.files.model.FileSystemEntry
 import kotlinx.serialization.Serializable
 
 /**
@@ -25,7 +20,21 @@ import kotlinx.serialization.Serializable
  * @property fs read-only filesystem provider for accessing files
  */
 public class ReadFileTool<Path>(private val fs: FileSystemProvider.ReadOnly<Path>) :
-    Tool<ReadFileTool.Args, ReadFileTool.Result>() {
+    Tool<ReadFileTool.Args, ReadFileTool.Result>(
+        argsSerializer = Args.serializer(),
+        resultSerializer = Result.serializer(),
+        name = "__read_file__",
+        description = """
+            Reads a text file (throws if non-text) with optional line range selection. TEXT-ONLY - never reads binary files.
+
+            Use this to:
+            - Read entire text files or specific line ranges
+            - Get file content along with metadata
+            - Extract portions of files using 0-based line indexing
+
+            Returns file content and metadata (name, extension, path, hidden, size, contentType).
+        """.trimIndent()
+    ) {
 
     /**
      * Specifies which file to read and what portion of its content to extract.
@@ -37,10 +46,13 @@ public class ReadFileTool<Path>(private val fs: FileSystemProvider.ReadOnly<Path
      */
     @Serializable
     public data class Args(
+        @property:LLMDescription("Absolute path to the text file you want to read (e.g., /home/user/file.txt)")
         val path: String,
+        @property:LLMDescription("First line to include (0-based, inclusive). Default is 0 to start from beginning")
         val startLine: Int = 0,
+        @property:LLMDescription("First line to exclude (0-based, exclusive). Use -1 to read until end. Default is -1")
         val endLine: Int = -1,
-    ) : ToolArgs
+    )
 
     /**
      * Contains the successfully read file with its metadata and extracted content.
@@ -52,26 +64,10 @@ public class ReadFileTool<Path>(private val fs: FileSystemProvider.ReadOnly<Path
      * @property file the file entry containing metadata and content
      */
     @Serializable
-    public data class Result(val file: FileSystemEntry.File) : ToolResult.JSONSerializable<Result> {
-        override fun getSerializer(): KSerializer<Result> = serializer()
-
-        /**
-         * Converts the result to a structured text representation.
-         *
-         * Renders the file information in the following format:
-         * - File path with metadata in parentheses (size, line count if available, "hidden" if the file is hidden)
-         * - Content section with either:
-         *     - Full text for complete file reads
-         *     - Excerpt with line ranges for partial reads
-         *     - No content section if content is [FileSystemEntry.File.Content.None]
-         *
-         * @return formatted text representation of the file
-         */
-        override fun toStringDefault(): String = text { file(file) }
-    }
-
-    override val argsSerializer: KSerializer<Args> = Args.serializer()
-    override val descriptor: ToolDescriptor = Companion.descriptor
+    public data class Result(
+        val file: FileSystemEntry.File,
+        val warningMessage: String? = null,
+    )
 
     /**
      * Reads file content from the filesystem with optional line range filtering.
@@ -81,8 +77,11 @@ public class ReadFileTool<Path>(private val fs: FileSystemProvider.ReadOnly<Path
      * - Confirms the path points to a file
      * - Confirms the file is a text file
      *
+     * If the requested `endLine` exceeds the file's line count, it will be clamped to the available lines
+     * and a warning will be included in the result.
+     *
      * @param args arguments specifying the file path and optional line range
-     * @return [Result] containing the file with its content and metadata
+     * @return [Result] containing the file with its content, metadata, and optional warning
      * @throws [ToolException.ValidationFailure] if the file doesn't exist, is a directory, or is not a text file, or
      *          if line range parameters are invalid
      */
@@ -96,6 +95,8 @@ public class ReadFileTool<Path>(private val fs: FileSystemProvider.ReadOnly<Path
         validate(type == FileMetadata.FileContentType.Text) { "File is not a text file: ${args.path}" }
 
         return runCatching {
+            var warningMessage: String? = null
+
             Result(
                 buildTextFileEntry(
                     fs = fs,
@@ -103,7 +104,12 @@ public class ReadFileTool<Path>(private val fs: FileSystemProvider.ReadOnly<Path
                     metadata = metadata,
                     startLine = args.startLine,
                     endLine = args.endLine,
-                )
+                    onEndLineExceedsFileLength = { endLine, fileLineCount ->
+                        warningMessage = "endLine=$endLine exceeds file length ($fileLineCount lines). " +
+                            "Clamped to available lines ${args.startLine}-$fileLineCount."
+                    }
+                ),
+                warningMessage
             )
         }.onFailure { e ->
             if (e is IllegalArgumentException) {
@@ -114,44 +120,13 @@ public class ReadFileTool<Path>(private val fs: FileSystemProvider.ReadOnly<Path
         }.getOrThrow()
     }
 
-    public companion object {
-        /**
-         * Provides a tool descriptor for the read file operation.
-         *
-         * Configures the tool to read text files with optional line range selection
-         * using 0-based indexing.
-         */
-        public val descriptor: ToolDescriptor = ToolDescriptor(
-            name = "__read_file__",
-            description = """
-                Reads a text file (throws if non-text) with optional line range selection. TEXT-ONLY - never reads binary files.
-                
-                Use this to:
-                - Read entire text files or specific line ranges
-                - Get file content along with metadata
-                - Extract portions of files using 0-based line indexing
-                
-                Returns file content and metadata (name, extension, path, hidden, size, contentType).
-            """.trimIndent(),
-            requiredParameters = listOf(
-                ToolParameterDescriptor(
-                    name = "path",
-                    description = "Absolute path to the text file you want to read (e.g., /home/user/file.txt)",
-                    type = ToolParameterType.String
-                )
-            ),
-            optionalParameters = listOf(
-                ToolParameterDescriptor(
-                    name = "startLine",
-                    description = "First line to include (0-based, inclusive). Default is 0 to start from beginning",
-                    type = ToolParameterType.Integer
-                ),
-                ToolParameterDescriptor(
-                    name = "endLine",
-                    description = "First line to exclude (0-based, exclusive). Use -1 to read until end. Default is -1",
-                    type = ToolParameterType.Integer
-                )
-            )
-        )
+    override fun encodeResultToString(result: Result): String = with(result) {
+        text {
+            warningMessage?.let {
+                +"Warning: $it"
+                +""
+            }
+            file(file)
+        }
     }
 }

@@ -35,10 +35,10 @@ kotlin {
                 api(libs.exposed.jdbc)
                 api(libs.exposed.json)
                 api(libs.exposed.kotlin.datetime)
-                api(libs.postgresql)
-                api(libs.mysql)
-                api(libs.h2)
-                api(libs.sqlite)
+                compileOnly(libs.h2)
+                compileOnly(libs.mysql)
+                compileOnly(libs.postgresql)
+                compileOnly(libs.sqlite)
                 implementation(libs.hikaricp)
             }
         }
@@ -47,10 +47,16 @@ kotlin {
             dependencies {
                 implementation(kotlin("test-junit5"))
                 implementation(project(":agents:agents-test"))
+                implementation(project(":test-utils"))
                 implementation(libs.mockk)
                 implementation(libs.testcontainers)
                 implementation(libs.testcontainers.postgresql)
                 implementation(libs.testcontainers.mysql)
+
+                runtimeOnly(libs.postgresql)
+                runtimeOnly(libs.mysql)
+                runtimeOnly(libs.h2)
+                runtimeOnly(libs.sqlite)
             }
         }
     }

@@ -8,8 +8,17 @@ import kotlin.jvm.JvmInline
 /**
  * Represents a result produced by a tool operation. This is a marker interface implemented by various result types.
  */
+@Deprecated("Extending ToolResult is no longer required. Tool results are entirely handled by KotlinX Serialization.")
 public interface ToolResult {
-    private companion object {
+    /**
+     * Companion object for the enclosing class.
+     *
+     * Provides utility functionalities, including methods to handle and interact with
+     * objects of types implementing the `TextSerializable` interface. It includes support
+     * for creating a text-based serializer for the objects using the `AsTextSerializer`
+     * class and a pre-configured `Json` instance for serialization with customizable options.
+     */
+    public companion object {
         private val json = Json {
             ignoreUnknownKeys = true
             encodeDefaults = true
@@ -28,6 +37,10 @@ public interface ToolResult {
     /**
      * Result implementation representing a simple tool result, just a string.
      */
+    @Deprecated(
+        "Extending ToolResult.Text is no longer required (just use plain String class instead). " +
+            "Tool results are entirely handled by KotlinX Serialization."
+    )
     @Serializable
     @JvmInline
     public value class Text(public val text: String) : JSONSerializable<Text> {
@@ -70,6 +83,7 @@ public interface ToolResult {
      *
      * @property result The internal `kotlin.Boolean` value representing the logical state.
      */
+    @Deprecated("Extending ToolResult.Boolean is no longer required (just use plain Boolean class instead). Tool results are entirely handled by KotlinX Serialization.")
     @JvmInline
     public value class Boolean(public val result: kotlin.Boolean) : ToolResult {
         /**
@@ -90,6 +104,7 @@ public interface ToolResult {
              */
             public val FALSE: Boolean = Boolean(false)
         }
+
         override fun toStringDefault(): String = result.toString()
     }
 
@@ -101,6 +116,7 @@ public interface ToolResult {
      *
      * @property result The underlying numeric value.
      */
+    @Deprecated("Extending ToolResult.Number is no longer required (just use plain Int/Double/... classes instead). Tool results are entirely handled by KotlinX Serialization.")
     @JvmInline
     public value class Number(public val result: kotlin.Number) : ToolResult {
         override fun toStringDefault(): String = result.toString()
@@ -112,6 +128,7 @@ public interface ToolResult {
      *
      * @param T The type of the implementing class, which must also be JSONSerializable.
      */
+    @Deprecated("Extending ToolResult.JSONSerializable<T> is no longer required (just use T type directly and mark it as `@Serializable`). Tool results are entirely handled by KotlinX Serialization.")
     public interface JSONSerializable<T : JSONSerializable<T>> : ToolResult {
         /**
          * Retrieves the serializer instance for the implementing class.

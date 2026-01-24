@@ -1,5 +1,6 @@
 package ai.koog.agents.core.feature.remote.client
 
+import ai.koog.agents.core.feature.AIAgentFeatureTestAPI.knownDefinedEvents
 import ai.koog.agents.core.feature.message.FeatureMessage
 import ai.koog.agents.core.feature.model.FeatureStringMessage
 import ai.koog.agents.core.feature.remote.client.config.DefaultClientConnectionConfig
@@ -7,7 +8,7 @@ import ai.koog.agents.core.feature.remote.server.FeatureMessageRemoteServer
 import ai.koog.agents.core.feature.remote.server.config.DefaultServerConnectionConfig
 import ai.koog.agents.core.feature.writer.TestFeatureEventMessage
 import ai.koog.agents.testing.network.NetUtil.findAvailablePort
-import ai.koog.agents.utils.use
+import ai.koog.utils.io.use
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.http.URLProtocol
 import kotlinx.coroutines.CompletableDeferred
@@ -25,6 +26,8 @@ import kotlinx.serialization.modules.SerializersModule
 import kotlinx.serialization.modules.polymorphic
 import org.junit.jupiter.api.Assertions.assertFalse
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -210,7 +213,7 @@ class FeatureMessageRemoteClientTest {
     @Test
     fun `test server is started with wait connection flag client connected`() = runBlocking {
         val port = findAvailablePort()
-        val serverConfig = DefaultServerConnectionConfig(port = port, waitConnection = true)
+        val serverConfig = DefaultServerConnectionConfig(port = port, awaitInitialConnection = true)
         val clientConfig = DefaultClientConnectionConfig(host = "127.0.0.1", port = port, protocol = URLProtocol.HTTP)
 
         FeatureMessageRemoteServer(connectionConfig = serverConfig).use { server ->
@@ -384,7 +387,7 @@ class FeatureMessageRemoteClientTest {
         val isClientFinished = CompletableDeferred<Boolean>()
         val isServerStarted = CompletableDeferred<Boolean>()
 
-        val testClientMessage = TestFeatureEventMessage("test client message")
+        val testClientMessage = TestFeatureEventMessage(testMessage = "test client message")
 
         val serverJob = launch {
             FeatureMessageRemoteServer(connectionConfig = serverConfig).use { server ->
@@ -433,4 +436,81 @@ class FeatureMessageRemoteClientTest {
     }
 
     //endregion Send
+
+    //region Receive
+
+    @Test
+    fun `test client receive all known events from a server`() = runBlocking {
+        val port = findAvailablePort()
+        val serverConfig = DefaultServerConnectionConfig(port = port)
+        val clientConfig = DefaultClientConnectionConfig(host = "127.0.0.1", port = port, protocol = URLProtocol.HTTP)
+
+        val isClientFinished = CompletableDeferred<Boolean>()
+        val isServerStarted = CompletableDeferred<Boolean>()
+
+        val actualClientMessages = mutableListOf<FeatureMessage>()
+
+        val serverJob = launch {
+            FeatureMessageRemoteServer(connectionConfig = serverConfig).use { server ->
+                server.start()
+                isServerStarted.complete(true)
+                logger.info { "Server is started on port: ${server.connectionConfig.port}" }
+
+                // Wait for a connected client
+                server.isClientConnected.first { it }
+
+                // Send known events
+                knownDefinedEvents.forEach { message ->
+                    server.sendMessage(message)
+                }
+
+                isClientFinished.await()
+                logger.info { "Server is finished successfully" }
+            }
+        }
+
+        val clientJob = launch {
+            FeatureMessageRemoteClient(connectionConfig = clientConfig, scope = this).use { client ->
+                logger.info { "Client connecting to remote server: ${client.connectionConfig.url}" }
+                isServerStarted.await()
+
+                val clientReceiveMessagesJob = launch {
+                    client.receivedMessages.consumeAsFlow().collect { message ->
+                        actualClientMessages.add(message)
+                        if (actualClientMessages.size == knownDefinedEvents.size) {
+                            cancel()
+                        }
+                    }
+                }
+
+                logger.info { "Server is started. Connecting client..." }
+                client.connect()
+
+                logger.info { "Wait for client to receive all events from a server..." }
+                clientReceiveMessagesJob.join()
+
+                isClientFinished.complete(true)
+                logger.info { "Client is finished successfully" }
+            }
+        }
+
+        val isFinishedOrNull = withTimeoutOrNull(defaultClientServerTimeout) {
+            listOf(clientJob, serverJob).joinAll()
+        }
+
+        assertNotNull(
+            isFinishedOrNull,
+            "Client or server did not finish in time.\n" +
+                "Expected events:\n${knownDefinedEvents.joinToString("\n") { " - $it" }}\n" +
+                "Actual events:\n${actualClientMessages.joinToString("\n") { " - $it" }}\n" +
+                "Missing events:\n${knownDefinedEvents.map { it::class.simpleName }.toSet()
+                    .minus(actualClientMessages.map { it::class.simpleName }.toSet())
+                    .joinToString("\n") { " - $it" }}\n"
+        )
+
+        assertEquals(knownDefinedEvents.size, actualClientMessages.size)
+        assertContentEquals(knownDefinedEvents, actualClientMessages)
+    }
+
+    //endregion Receive
 }

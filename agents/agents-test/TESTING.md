@@ -172,7 +172,7 @@ assertNodes {
     callTool withInput toolCallSignature(
         SolveTool,
         SolveTool.Args("solve")
-    ) outputs toolResult(SolveTool, "solved")
+    ) outputs toolResult(SolveTool, SolveTool.Args("solve"), "solved")
 }
 ```
 
@@ -203,7 +203,7 @@ assertNodes {
     callTool withInput toolCallSignature(
         AnalyzeTool,
         AnalyzeTool.Args(query = "complex", depth = 5)
-    ) outputs toolResult(AnalyzeTool, AnalyzeTool.Result(
+    ) outputs toolResult(AnalyzeTool, AnalyzeTool.Args(query = "complex", depth = 5), AnalyzeTool.Result(
         analysis = "Detailed analysis",
         confidence = 0.95,
         metadata = mapOf("source" to "database", "timestamp" to "2023-06-15")
@@ -255,7 +255,8 @@ For sophisticated agents, you can test conditional routing based on structured d
 assertEdges {
     // Test routing based on tool result content
     callTool withOutput toolResult(
-        AnalyzeTool, 
+        AnalyzeTool,
+        AnalyzeTool.Args(query = "parameters", depth = 3),
         AnalyzeTool.Result(analysis = "Needs more processing", confidence = 0.5)
     ) goesTo processResult
 }
@@ -267,7 +268,8 @@ You can also test complex decision paths based on different result properties:
 assertEdges {
     // Route to different nodes based on confidence level
     callTool withOutput toolResult(
-        AnalyzeTool, 
+        AnalyzeTool,
+        AnalyzeTool.Args(query = "parameters", depth = 3),
         AnalyzeTool.Result(analysis = "Complete", confidence = 0.9)
     ) goesTo finish
 
@@ -307,7 +309,7 @@ fun testToneAgent() = runTest {
 
     // Create an event handler
     val eventHandler = EventHandler {
-        onToolCall { tool, args ->
+        onToolCallStarting { tool, args ->
             println("[DEBUG_LOG] Tool called: tool ${tool.name}, args $args")
             toolCalls.add(tool.name)
         }
@@ -422,7 +424,7 @@ fun testMultiSubgraphAgentStructure() = runTest {
             val sendToolResult by nodeLLMSendToolResult()
             val giveFeedback by node<String, String> { input ->
                 llm.writeSession {
-                    updatePrompt {
+                    appendPrompt {
                         user("Call tools! Don't chat!")
                     }
                 }
@@ -494,7 +496,7 @@ fun testMultiSubgraphAgentStructure() = runTest {
                     callTool withInput toolCallMessage(
                         SolveTool,
                         SolveTool.Args("solve")
-                    ) outputs toolResult(SolveTool, "solved")
+                    ) outputs toolResult(SolveTool, SolveTool.Args("solve"), "solved")
 
                     callTool withInput toolCallMessage(
                         CreateTool,

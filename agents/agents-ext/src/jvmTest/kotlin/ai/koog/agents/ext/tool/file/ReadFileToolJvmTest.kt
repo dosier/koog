@@ -1,6 +1,5 @@
 package ai.koog.agents.ext.tool.file
 
-import ai.koog.agents.core.tools.DirectToolCallsEnabler
 import ai.koog.agents.core.tools.ToolException
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
 import ai.koog.agents.ext.tool.file.render.norm
@@ -21,7 +20,6 @@ import kotlin.test.assertEquals
 class ReadFileToolJvmTest {
 
     private val fs = JVMFileSystemProvider.ReadOnly
-    private val enabler = object : DirectToolCallsEnabler {}
     private val tool = ReadFileTool(fs)
 
     @TempDir
@@ -31,7 +29,7 @@ class ReadFileToolJvmTest {
         tempDir.resolve(name).createFile().apply { writeText(content) }
 
     private suspend fun readFile(path: Path, startLine: Int = 0, endLine: Int = -1): ReadFileTool.Result =
-        tool.execute(ReadFileTool.Args(path.toString(), startLine, endLine), enabler)
+        tool.execute(ReadFileTool.Args(path.toString(), startLine, endLine))
 
     @Test
     fun `Args uses correct defaults`() {
@@ -43,7 +41,7 @@ class ReadFileToolJvmTest {
 
     @Test
     fun `descriptor is configured correctly`() {
-        val descriptor = ReadFileTool.descriptor
+        val descriptor = tool.descriptor
         assertEquals("__read_file__", descriptor.name)
         assertTrue(descriptor.description.isNotEmpty())
         assertEquals(listOf("path"), descriptor.requiredParameters.map { it.name })
@@ -89,7 +87,7 @@ class ReadFileToolJvmTest {
             ```
         """.trimIndent()
 
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 
     @Test
@@ -115,7 +113,7 @@ class ReadFileToolJvmTest {
             ```
         """.trimIndent()
 
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 
     @Test
@@ -132,7 +130,7 @@ class ReadFileToolJvmTest {
             c
         """.trimIndent()
 
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 
     @Test
@@ -147,7 +145,7 @@ class ReadFileToolJvmTest {
             b: 2
             ```
         """.trimIndent()
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 
     @Test
@@ -161,7 +159,7 @@ class ReadFileToolJvmTest {
             print('hi')
             ```
         """.trimIndent()
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 
     @Test
@@ -175,7 +173,7 @@ class ReadFileToolJvmTest {
             Write-Host 'hello'
             ```
         """.trimIndent()
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 
     @Test
@@ -189,7 +187,7 @@ class ReadFileToolJvmTest {
             task hello { }
             ```
         """.trimIndent()
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 
     @Test
@@ -203,7 +201,7 @@ class ReadFileToolJvmTest {
             echo hello
             ```
         """.trimIndent()
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 
     @Test
@@ -234,7 +232,7 @@ class ReadFileToolJvmTest {
             fun c() = 3
             ```
         """.trimIndent()
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 
     @Test
@@ -247,7 +245,7 @@ class ReadFileToolJvmTest {
             ```markdown
             ```
         """.trimIndent()
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 
     @Test
@@ -304,5 +302,22 @@ class ReadFileToolJvmTest {
         assertThrows<ToolException.ValidationFailure> {
             runBlocking { readFile(f, startLine = 0, endLine = -2) }
         }
+    }
+
+    @Test
+    fun `includes warning when endLine exceeds file length`() = runBlocking {
+        val f = createTestFile("short.txt", "line1\nline2\nline3")
+
+        val result = readFile(f, startLine = 0, endLine = 200)
+
+        val expected = """
+            Warning: endLine=200 exceeds file length (3 lines). Clamped to available lines 0-3.
+            ${"${f.toAbsolutePath().toString().norm()} (<0.1 KiB, 3 lines)"}
+            Content:
+            line1
+            line2
+            line3
+        """.trimIndent()
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 }

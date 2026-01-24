@@ -10,16 +10,17 @@ import ai.koog.integration.tests.OllamaTestFixture
 import ai.koog.integration.tests.OllamaTestFixtureExtension
 import ai.koog.integration.tests.utils.annotations.Retry
 import ai.koog.integration.tests.utils.annotations.RetryExtension
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
-import kotlin.test.AfterTest
-import kotlin.test.Test
-import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 @ExtendWith(OllamaTestFixtureExtension::class)
 @ExtendWith(RetryExtension::class)
-class OllamaSimpleAgentIntegrationTest {
+class OllamaSimpleAgentIntegrationTest : AIAgentTestBase() {
     companion object {
         @field:InjectOllamaTestFixture
         private lateinit var fixture: OllamaTestFixture
@@ -28,74 +29,14 @@ class OllamaSimpleAgentIntegrationTest {
     }
 
     val eventHandlerConfig: EventHandlerConfig.() -> Unit = {
-        onBeforeAgentStarted { eventContext ->
-            println(
-                "Agent started: agentId=${eventContext.agent.javaClass.simpleName}"
-            )
-        }
-
-        onAgentFinished { eventContext ->
-            println("Agent finished: agentId=${eventContext.agentId}, result=${eventContext.result}")
-        }
-
-        onAgentRunError { eventContext ->
-            println("Agent error: agentId=${eventContext.agentId}, error=${eventContext.throwable.message}")
-        }
-
-        onStrategyStarted { eventContext ->
-            println("Strategy started: ${eventContext.strategy.name}")
-        }
-
-        onStrategyFinished { eventContext ->
-            println("Strategy finished: strategy=${eventContext.strategy.name}, result=${eventContext.result}")
-        }
-
-        onBeforeNode { eventContext ->
-            println("Before node: node=${eventContext.node.javaClass.simpleName}, input=${eventContext.input}")
-        }
-
-        onAfterNode { eventContext ->
-            println(
-                "After node: node=${eventContext.node.javaClass.simpleName}, input=${eventContext.input}, output=${eventContext.output}"
-            )
-        }
-
-        onBeforeLLMCall { eventContext ->
-            println("Before LLM call: prompt=${eventContext.prompt}")
-        }
-
-        onAfterLLMCall { eventContext ->
-            val lastResponse = eventContext.responses.last().content
-            println("After LLM call: response=${lastResponse.take(100)}${if (lastResponse.length > 100) "..." else ""}")
-        }
-
-        onToolCall { eventContext ->
-            println("Tool called: tool=${eventContext.tool.name}, args=${eventContext.toolArgs}")
-            actualToolCalls.add(eventContext.tool.name)
-        }
-
-        onToolValidationError { eventContext ->
-            println(
-                "Tool validation error: tool=${eventContext.tool.name}, args=${eventContext.toolArgs}, value=${eventContext.error}"
-            )
-        }
-
-        onToolCallFailure { eventContext ->
-            println(
-                "Tool call failure: tool=${eventContext.tool.name}, args=${eventContext.toolArgs}, error=${eventContext.throwable.message}"
-            )
-        }
-
-        onToolCallResult { eventContext ->
-            println(
-                "Tool call result: tool=${eventContext.tool.name}, args=${eventContext.toolArgs}, result=${eventContext.result}"
-            )
+        onToolCallStarting { eventContext ->
+            actualToolCalls.add(eventContext.toolName)
         }
     }
 
     val actualToolCalls = mutableListOf<String>()
 
-    @AfterTest
+    @AfterEach
     fun teardown() {
         actualToolCalls.clear()
     }
@@ -123,7 +64,7 @@ class OllamaSimpleAgentIntegrationTest {
             }
         """.trimIndent()
 
-        val agent = AIAgent(
+        AIAgent(
             promptExecutor = ollamaSimpleExecutor,
             systemPrompt = bookwormPrompt,
             llmModel = ollamaModel,
@@ -131,14 +72,8 @@ class OllamaSimpleAgentIntegrationTest {
             toolRegistry = toolRegistry,
             maxIterations = 10,
             installFeatures = { install(EventHandler.Feature, eventHandlerConfig) }
-        )
+        ).run("Give me top 10 books of the all time.")
 
-        agent.run("Give me top 10 books of the all time.")
-
-        assertTrue(actualToolCalls.isNotEmpty(), "No tools were called for model")
-        assertTrue(
-            actualToolCalls.contains(SayToUser.name),
-            "The ${SayToUser.name} tool was not called for model"
-        )
+        actualToolCalls.shouldNotBeEmpty().shouldContain(SayToUser.name)
     }
 }

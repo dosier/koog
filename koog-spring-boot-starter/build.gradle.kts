@@ -1,4 +1,6 @@
 import ai.koog.gradle.publish.maven.Publishing.publishToMaven
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 
 group = rootProject.group
 version = rootProject.version
@@ -14,6 +16,18 @@ kotlin {
     explicitApi()
 }
 
+// Override JVM target to 17 for Spring Boot 3.x compatibility
+tasks.withType<KotlinJvmCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    sourceCompatibility = JavaVersion.VERSION_17.toString()
+    targetCompatibility = JavaVersion.VERSION_17.toString()
+}
+
 dependencies {
     api(project(":koog-agents"))
 
@@ -23,6 +37,7 @@ dependencies {
 
     testImplementation(libs.spring.boot.starter.test)
     testRuntimeOnly(libs.junit.platform.launcher)
+    testRuntimeOnly(libs.ktor.client.apache5)
 }
 
 publishToMaven()

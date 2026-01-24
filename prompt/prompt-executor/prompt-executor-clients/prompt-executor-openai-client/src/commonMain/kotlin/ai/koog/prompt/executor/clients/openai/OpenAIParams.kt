@@ -4,9 +4,11 @@ import ai.koog.prompt.executor.clients.openai.base.models.OpenAIAudioConfig
 import ai.koog.prompt.executor.clients.openai.base.models.OpenAIWebSearchOptions
 import ai.koog.prompt.executor.clients.openai.base.models.ReasoningEffort
 import ai.koog.prompt.executor.clients.openai.base.models.ServiceTier
+import ai.koog.prompt.executor.clients.openai.models.OpenAIInclude
 import ai.koog.prompt.executor.clients.openai.models.ReasoningConfig
 import ai.koog.prompt.executor.clients.openai.models.Truncation
 import ai.koog.prompt.params.LLMParams
+import kotlinx.serialization.json.JsonElement
 import org.jetbrains.annotations.ApiStatus.Experimental
 
 internal sealed interface OpenAIParams
@@ -21,7 +23,7 @@ internal fun LLMParams.toOpenAIChatParams(): OpenAIChatParams {
         schema = schema,
         toolChoice = toolChoice,
         user = user,
-        includeThoughts = includeThoughts,
+        additionalProperties = additionalProperties,
     )
 }
 
@@ -35,7 +37,7 @@ internal fun LLMParams.toOpenAIResponsesParams(): OpenAIResponsesParams {
         schema = schema,
         toolChoice = toolChoice,
         user = user,
-        includeThoughts = includeThoughts,
+        additionalProperties = additionalProperties,
     )
 }
 
@@ -56,8 +58,7 @@ internal fun LLMParams.toOpenAIResponsesParams(): OpenAIResponsesParams {
  * @property toolChoice Controls if/which tool must be called (`none`/`auto`/`required`/specific).
  * @property user (**Deprecated**) legacy stable end-user identifier; prefer [safetyIdentifier]
  *   and [promptCacheKey] to preserve caching and safety benefits.
- * @property includeThoughts Request inclusion of model “thoughts”/reasoning traces (model-dependent).
- * @property thinkingBudget Soft cap on tokens spent on internal reasoning (reasoning models).
+ * @property additionalProperties Additional properties that can be used to store custom parameters.
  * @property frequencyPenalty Number in [-2.0, 2.0]—penalizes frequent tokens to reduce repetition.
  * @property presencePenalty Number in [-2.0, 2.0]—encourages an introduction of new tokens/topics.
  * @property parallelToolCalls Allow multiple tool calls in parallel.
@@ -73,6 +74,7 @@ internal fun LLMParams.toOpenAIResponsesParams(): OpenAIResponsesParams {
  * @property topP Nucleus sampling in (0.0, 1.0]; use **instead of** [temperature].
  * @property webSearchOptions Configure web search tool usage (if supported).
  */
+@Suppress("LongParameterList")
 public class OpenAIChatParams(
     temperature: Double? = null,
     maxTokens: Int? = null,
@@ -81,8 +83,7 @@ public class OpenAIChatParams(
     schema: Schema? = null,
     toolChoice: ToolChoice? = null,
     user: String? = null,
-    includeThoughts: Boolean? = null,
-    thinkingBudget: Int? = null,
+    additionalProperties: Map<String, JsonElement>? = null,
     public val frequencyPenalty: Double? = null,
     public val presencePenalty: Double? = null,
     public val parallelToolCalls: Boolean? = null,
@@ -98,9 +99,14 @@ public class OpenAIChatParams(
     public val topP: Double? = null,
     public val webSearchOptions: OpenAIWebSearchOptions? = null
 ) : LLMParams(
-    temperature, maxTokens, numberOfChoices,
-    speculation, schema, toolChoice,
-    user, includeThoughts, thinkingBudget
+    temperature,
+    maxTokens,
+    numberOfChoices,
+    speculation,
+    schema,
+    toolChoice,
+    user,
+    additionalProperties
 ),
     OpenAIParams {
     init {
@@ -150,8 +156,7 @@ public class OpenAIChatParams(
         schema: Schema? = this.schema,
         toolChoice: ToolChoice? = this.toolChoice,
         user: String? = this.user,
-        includeThoughts: Boolean? = this.includeThoughts,
-        thinkingBudget: Int? = this.thinkingBudget,
+        additionalProperties: Map<String, JsonElement>? = this.additionalProperties,
         frequencyPenalty: Double? = this.frequencyPenalty,
         presencePenalty: Double? = this.presencePenalty,
         parallelToolCalls: Boolean? = this.parallelToolCalls,
@@ -174,8 +179,7 @@ public class OpenAIChatParams(
         schema = schema,
         toolChoice = toolChoice,
         user = user,
-        includeThoughts = includeThoughts,
-        thinkingBudget = thinkingBudget,
+        additionalProperties = additionalProperties,
         frequencyPenalty = frequencyPenalty,
         presencePenalty = presencePenalty,
         parallelToolCalls = parallelToolCalls,
@@ -203,8 +207,7 @@ public class OpenAIChatParams(
                 schema == other.schema &&
                 toolChoice == other.toolChoice &&
                 user == other.user &&
-                includeThoughts == other.includeThoughts &&
-                thinkingBudget == other.thinkingBudget &&
+                additionalProperties == other.additionalProperties &&
                 frequencyPenalty == other.frequencyPenalty &&
                 presencePenalty == other.presencePenalty &&
                 parallelToolCalls == other.parallelToolCalls &&
@@ -223,9 +226,8 @@ public class OpenAIChatParams(
 
     override fun hashCode(): Int = listOf(
         temperature, maxTokens, numberOfChoices,
-        speculation, schema, toolChoice,
-        user, includeThoughts, thinkingBudget,
-        frequencyPenalty, presencePenalty,
+        speculation, schema, toolChoice, user,
+        additionalProperties, frequencyPenalty, presencePenalty,
         parallelToolCalls, promptCacheKey,
         safetyIdentifier, serviceTier,
         store, audio, logprobs,
@@ -244,8 +246,7 @@ public class OpenAIChatParams(
         append(", schema=$schema")
         append(", toolChoice=$toolChoice")
         append(", user=$user")
-        append(", includeThoughts=$includeThoughts")
-        append(", thinkingBudget=$thinkingBudget")
+        append(", additionalProperties=$additionalProperties")
         append(", frequencyPenalty=$frequencyPenalty")
         append(", presencePenalty=$presencePenalty")
         append(", parallelToolCalls=$parallelToolCalls")
@@ -281,8 +282,7 @@ public class OpenAIChatParams(
  * @property toolChoice Controls if/which tool(s) may be called (`none` / `auto` / `required` / specific).
  * @property user (**Deprecated**) legacy stable end-user identifier; prefer [safetyIdentifier] and
  *   [promptCacheKey] to preserve caching and safety benefits.
- * @property includeThoughts Request inclusion of model “thoughts”/reasoning traces (model-dependent).
- * @property thinkingBudget Soft cap on tokens spent on internal reasoning (reasoning models).
+ * @property additionalProperties Additional properties that can be used to store custom parameters.
  * @property background Run the response in the background (non-blocking).
  * @property include Additional output sections to include (see the list above).
  * @property maxToolCalls Maximum total number of built-in tool calls allowed in this response (≥ 0).
@@ -306,10 +306,9 @@ public class OpenAIResponsesParams(
     schema: Schema? = null,
     toolChoice: ToolChoice? = null,
     user: String? = null,
-    includeThoughts: Boolean? = null,
-    thinkingBudget: Int? = null,
+    additionalProperties: Map<String, JsonElement>? = null,
     public val background: Boolean? = null,
-    public val include: List<String>? = null,
+    public val include: List<OpenAIInclude>? = null,
     public val maxToolCalls: Int? = null,
     public val parallelToolCalls: Boolean? = null,
     public val reasoning: ReasoningConfig? = null,
@@ -322,9 +321,14 @@ public class OpenAIResponsesParams(
     public val topLogprobs: Int? = null,
     public val topP: Double? = null,
 ) : LLMParams(
-    temperature, maxTokens, numberOfChoices,
-    speculation, schema, toolChoice,
-    user, includeThoughts, thinkingBudget
+    temperature,
+    maxTokens,
+    numberOfChoices,
+    speculation,
+    schema,
+    toolChoice,
+    user,
+    additionalProperties
 ),
     OpenAIParams {
     init {
@@ -355,7 +359,6 @@ public class OpenAIResponsesParams(
         // include validations
         if (include != null) {
             require(include.isNotEmpty()) { "include must not be empty when provided." }
-            require(include.all { it.isNotBlank() }) { "include entries must be non-blank" }
         }
 
         // maxToolCalls bounds
@@ -375,10 +378,9 @@ public class OpenAIResponsesParams(
         schema: Schema? = this.schema,
         toolChoice: ToolChoice? = this.toolChoice,
         user: String? = this.user,
-        includeThoughts: Boolean? = this.includeThoughts,
-        thinkingBudget: Int? = this.thinkingBudget,
+        additionalProperties: Map<String, JsonElement>? = this.additionalProperties,
         background: Boolean? = this.background,
-        include: List<String>? = this.include,
+        include: List<OpenAIInclude>? = this.include,
         maxToolCalls: Int? = this.maxToolCalls,
         parallelToolCalls: Boolean? = this.parallelToolCalls,
         reasoning: ReasoningConfig? = this.reasoning,
@@ -398,8 +400,7 @@ public class OpenAIResponsesParams(
         schema = schema,
         toolChoice = toolChoice,
         user = user,
-        includeThoughts = includeThoughts,
-        thinkingBudget = thinkingBudget,
+        additionalProperties = additionalProperties,
         background = background,
         include = include,
         maxToolCalls = maxToolCalls,
@@ -426,8 +427,7 @@ public class OpenAIResponsesParams(
                 schema == other.schema &&
                 toolChoice == other.toolChoice &&
                 user == other.user &&
-                includeThoughts == other.includeThoughts &&
-                thinkingBudget == other.thinkingBudget &&
+                additionalProperties == other.additionalProperties &&
                 background == other.background &&
                 include == other.include &&
                 maxToolCalls == other.maxToolCalls &&
@@ -445,9 +445,8 @@ public class OpenAIResponsesParams(
 
     override fun hashCode(): Int = listOf(
         temperature, maxTokens, numberOfChoices,
-        speculation, schema, toolChoice,
-        user, includeThoughts, thinkingBudget,
-        background, include, maxToolCalls,
+        speculation, schema, toolChoice, user,
+        additionalProperties, background, include, maxToolCalls,
         parallelToolCalls, reasoning,
         truncation, promptCacheKey, safetyIdentifier,
         serviceTier, store, logprobs, topLogprobs, topP,
@@ -464,8 +463,7 @@ public class OpenAIResponsesParams(
         append(", schema=$schema")
         append(", toolChoice=$toolChoice")
         append(", user=$user")
-        append(", includeThoughts=$includeThoughts")
-        append(", thinkingBudget=$thinkingBudget")
+        append(", additionalProperties=$additionalProperties")
         append(", background=$background")
         append(", include=$include")
         append(", maxToolCalls=$maxToolCalls")

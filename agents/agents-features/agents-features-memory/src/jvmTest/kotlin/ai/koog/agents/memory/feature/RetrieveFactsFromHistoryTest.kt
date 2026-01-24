@@ -4,21 +4,18 @@ import ai.koog.agents.core.agent.config.AIAgentConfig
 import ai.koog.agents.core.agent.context.AIAgentLLMContext
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.memory.model.Concept
-import ai.koog.agents.memory.model.DefaultTimeProvider
 import ai.koog.agents.memory.model.Fact
 import ai.koog.agents.memory.model.FactType
 import ai.koog.agents.memory.model.MultipleFacts
 import ai.koog.agents.memory.model.SingleFact
 import ai.koog.agents.testing.tools.MockEnvironment
 import ai.koog.agents.testing.tools.getMockExecutor
-import ai.koog.agents.testing.tools.mockLLMAnswer
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.mockkObject
 import kotlinx.coroutines.test.runTest
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -37,6 +34,7 @@ class RetrieveFactsFromHistoryTest {
     private val testClock: Clock = object : Clock {
         override fun now(): Instant = Instant.parse("2023-01-01T00:00:00Z")
     }
+    private val testTimestamp = testClock.now().toEpochMilliseconds()
 
     /**
      * Test that retrieveFactsFromHistory correctly extracts a single fact.
@@ -46,11 +44,6 @@ class RetrieveFactsFromHistoryTest {
         // Arrange
         val concept = Concept("test-concept", "Test concept description", FactType.SINGLE)
         val factText = "This is a test fact"
-        val testTimestamp = 1234567890L
-
-        // Mock DefaultTimeProvider to return a fixed timestamp
-        mockkObject(DefaultTimeProvider)
-        every { DefaultTimeProvider.getCurrentTimestamp() } returns testTimestamp
 
         // Create a mock prompt executor that returns a response with the fact
         val promptExecutor = getMockExecutor(clock = testClock) {
@@ -65,6 +58,7 @@ class RetrieveFactsFromHistoryTest {
                 assistant("Hi there")
             },
             model = testModel,
+            responseProcessor = null,
             promptExecutor = promptExecutor,
             environment = MockEnvironment(toolRegistry = ToolRegistry.EMPTY, promptExecutor),
             config = AIAgentConfig(Prompt.Empty, testModel, 100),
@@ -74,7 +68,7 @@ class RetrieveFactsFromHistoryTest {
         // Use the writeSession method to create a session and call retrieveFactsFromHistory
         var result: Fact? = null
         llmContext.writeSession {
-            result = retrieveFactsFromHistory(concept)
+            result = retrieveFactsFromHistory(concept, testClock)
         }
 
         // Assert
@@ -92,11 +86,6 @@ class RetrieveFactsFromHistoryTest {
         // Arrange
         val concept = Concept("test-concept", "Test concept description", FactType.MULTIPLE)
         val factsList = listOf("Fact 1", "Fact 2", "Fact 3")
-        val testTimestamp = 1234567890L
-
-        // Mock DefaultTimeProvider to return a fixed timestamp
-        mockkObject(DefaultTimeProvider)
-        every { DefaultTimeProvider.getCurrentTimestamp() } returns testTimestamp
 
         // Create a mock prompt executor that returns a response with multiple facts
         val promptExecutor = getMockExecutor(clock = testClock) {
@@ -113,6 +102,7 @@ class RetrieveFactsFromHistoryTest {
                 assistant("Hi there")
             },
             model = testModel,
+            responseProcessor = null,
             promptExecutor = promptExecutor,
             environment = MockEnvironment(toolRegistry = ToolRegistry.EMPTY, promptExecutor),
             config = AIAgentConfig(Prompt.Empty, testModel, 100),
@@ -122,7 +112,7 @@ class RetrieveFactsFromHistoryTest {
         // Use the writeSession method to create a session and call retrieveFactsFromHistory
         var result: Fact? = null
         llmContext.writeSession {
-            result = retrieveFactsFromHistory(concept)
+            result = retrieveFactsFromHistory(concept, testClock)
         }
 
         // Assert
@@ -139,11 +129,6 @@ class RetrieveFactsFromHistoryTest {
     fun testRetrieveFactsFromHistorySingleFactError() = runTest {
         // Arrange
         val concept = Concept("test-concept", "Test concept description", FactType.SINGLE)
-        val testTimestamp = 1234567890L
-
-        // Mock DefaultTimeProvider to return a fixed timestamp
-        mockkObject(DefaultTimeProvider)
-        every { DefaultTimeProvider.getCurrentTimestamp() } returns testTimestamp
 
         // Create a mock prompt executor that returns an invalid JSON response
         val promptExecutor = getMockExecutor(clock = testClock) {
@@ -158,6 +143,7 @@ class RetrieveFactsFromHistoryTest {
                 assistant("Hi there")
             },
             model = testModel,
+            responseProcessor = null,
             promptExecutor = promptExecutor,
             environment = MockEnvironment(toolRegistry = ToolRegistry.EMPTY, promptExecutor),
             config = AIAgentConfig(Prompt.Empty, testModel, 100),
@@ -167,7 +153,7 @@ class RetrieveFactsFromHistoryTest {
         // Use the writeSession method to create a session and call retrieveFactsFromHistory
         var result: Fact? = null
         llmContext.writeSession {
-            result = retrieveFactsFromHistory(concept)
+            result = retrieveFactsFromHistory(concept, testClock)
         }
 
         // Assert
@@ -184,11 +170,6 @@ class RetrieveFactsFromHistoryTest {
     fun testRetrieveFactsFromHistoryMultipleFactsError() = runTest {
         // Arrange
         val concept = Concept("test-concept", "Test concept description", FactType.MULTIPLE)
-        val testTimestamp = 1234567890L
-
-        // Mock DefaultTimeProvider to return a fixed timestamp
-        mockkObject(DefaultTimeProvider)
-        every { DefaultTimeProvider.getCurrentTimestamp() } returns testTimestamp
 
         // Create a mock prompt executor that returns an invalid JSON response
         val promptExecutor = getMockExecutor(clock = testClock) {
@@ -203,6 +184,7 @@ class RetrieveFactsFromHistoryTest {
                 assistant("Hi there")
             },
             model = testModel,
+            responseProcessor = null,
             promptExecutor = promptExecutor,
             environment = MockEnvironment(toolRegistry = ToolRegistry.EMPTY, promptExecutor),
             config = AIAgentConfig(Prompt.Empty, testModel, 100),
@@ -212,7 +194,7 @@ class RetrieveFactsFromHistoryTest {
         // Use the writeSession method to create a session and call retrieveFactsFromHistory
         var result: Fact? = null
         llmContext.writeSession {
-            result = retrieveFactsFromHistory(concept)
+            result = retrieveFactsFromHistory(concept, testClock)
         }
 
         // Assert
@@ -234,11 +216,6 @@ class RetrieveFactsFromHistoryTest {
         // Arrange
         val concept = Concept("test-concept", "Test concept description", FactType.SINGLE)
         val factText = "This is a test fact"
-        val testTimestamp = 1234567890L
-
-        // Mock DefaultTimeProvider to return a fixed timestamp
-        mockkObject(DefaultTimeProvider)
-        every { DefaultTimeProvider.getCurrentTimestamp() } returns testTimestamp
 
         // Create a mock prompt executor that returns a response with the fact
         val promptExecutor = getMockExecutor(clock = testClock) {
@@ -258,6 +235,7 @@ class RetrieveFactsFromHistoryTest {
             tools = emptyList(),
             prompt = originalPrompt,
             model = testModel,
+            responseProcessor = null,
             promptExecutor = promptExecutor,
             environment = MockEnvironment(toolRegistry = ToolRegistry.EMPTY, promptExecutor),
             config = AIAgentConfig(Prompt.Empty, testModel, 100),
@@ -275,7 +253,7 @@ class RetrieveFactsFromHistoryTest {
             capturedOriginalPrompt = this.prompt
 
             // Call retrieveFactsFromHistory
-            result = retrieveFactsFromHistory(concept)
+            result = retrieveFactsFromHistory(concept, testClock)
 
             // Capture the final prompt after restoration
             capturedFinalPrompt = this.prompt

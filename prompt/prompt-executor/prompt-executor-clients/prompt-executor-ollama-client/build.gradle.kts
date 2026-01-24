@@ -13,8 +13,10 @@ kotlin {
         commonMain {
             dependencies {
                 api(project(":agents:agents-tools"))
+                api(project(":http-client:http-client-core"))
                 api(project(":prompt:prompt-llm"))
                 api(project(":prompt:prompt-model"))
+                api(project(":prompt:prompt-tokenizer"))
                 api(project(":agents:agents-tools"))
                 api(project(":prompt:prompt-executor:prompt-executor-model"))
                 api(project(":prompt:prompt-executor:prompt-executor-clients"))
@@ -30,33 +32,27 @@ kotlin {
             }
         }
 
-        androidMain {
+        androidUnitTest {
             dependencies {
                 implementation(libs.ktor.client.cio)
             }
         }
 
-        appleMain {
+        appleTest {
             dependencies {
-                api(libs.ktor.client.darwin)
+                implementation(libs.ktor.client.darwin)
             }
         }
 
-        jsMain {
+        jsTest {
             dependencies {
-                api(libs.ktor.client.js)
+                implementation(libs.ktor.client.js)
             }
         }
 
-        wasmJsMain {
+        wasmJsTest {
             dependencies {
-                api(libs.ktor.client.cio)
-            }
-        }
-
-        jvmMain {
-            dependencies {
-                api(libs.ktor.client.cio)
+                implementation(libs.ktor.client.cio)
             }
         }
 
@@ -64,6 +60,9 @@ kotlin {
             dependencies {
                 implementation(project(":test-utils"))
                 implementation(project(":agents:agents-features:agents-features-event-handler"))
+                implementation(libs.kotlinx.coroutines.core)
+                implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.ktor.client.mock)
             }
         }
 
@@ -72,6 +71,7 @@ kotlin {
                 implementation(project(":agents:agents-core"))
                 implementation(project(":agents:agents-features:agents-features-event-handler"))
                 implementation(project(":agents:agents-features:agents-features-trace"))
+                implementation(libs.ktor.client.cio)
             }
         }
     }

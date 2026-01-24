@@ -13,10 +13,12 @@ kotlin {
         commonMain {
             dependencies {
                 api(project(":agents:agents-tools"))
-                api(project(":agents:agents-utils"))
+                api(project(":http-client:http-client-core"))
+                api(project(":utils"))
                 api(project(":prompt:prompt-executor:prompt-executor-clients"))
                 api(project(":prompt:prompt-llm"))
                 api(project(":prompt:prompt-model"))
+                api(project(":http-client:http-client-ktor"))
                 api(libs.kotlinx.coroutines.core)
                 api(libs.kotlinx.datetime)
                 api(libs.ktor.client.content.negotiation)
@@ -25,26 +27,22 @@ kotlin {
             }
         }
 
-        jvmMain {
-            dependencies {
-                api(libs.ktor.client.cio)
-            }
-        }
-
         jsMain {
             dependencies {
-                api(libs.ktor.client.js)
+                implementation(libs.ktor.client.js)
             }
         }
 
         commonTest {
             dependencies {
                 implementation(project(":test-utils"))
+                implementation(libs.kotest.assertions.json)
             }
         }
 
         jvmTest {
             dependencies {
+                implementation(libs.ktor.client.cio)
             }
         }
     }

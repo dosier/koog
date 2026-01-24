@@ -1,6 +1,6 @@
 package ai.koog.agents.core.feature.message
 
-import ai.koog.agents.utils.Closeable
+import ai.koog.utils.io.Closeable
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -18,6 +18,37 @@ import kotlinx.coroutines.flow.StateFlow
  * information about various events or updates related to features in the system.
  */
 public abstract class FeatureMessageProcessor : Closeable {
+    /**
+     * A filter for messages to be sent to message processors.
+     *
+     * This function is called for each event before it's sent to the message processors.
+     * If the function returns true, the event is processed; if it returns false, the event is ignored.
+     *
+     * By default, all messages are processed (the filter returns true for all messages).
+     */
+    public var messageFilter: (FeatureMessage) -> Boolean = { true }
+        private set
+
+    /**
+     * Sets the message filter used to determine which feature messages should be processed.
+     *
+     * The provided filter function is invoked for each incoming feature message. If the filter
+     * function returns `true`, the message is deemed to meet the criteria for further processing.
+     *
+     * @param filter A lambda function that accepts a [FeatureMessage] and returns a boolean
+     * indicating whether the message should be processed (`true`) or ignored (`false`).
+     *
+     * Example:
+     * ```kotlin
+     *   processor.setMessageFilter { message ->
+     *     message is LLMCallStartingEvent ||
+     *     message is LLMCallCompletedEvent
+     *   }
+     * ```
+     */
+    public fun setMessageFilter(filter: (FeatureMessage) -> Boolean) {
+        messageFilter = filter
+    }
 
     /**
      * A [StateFlow] representing the current open state of the processor.
@@ -27,12 +58,26 @@ public abstract class FeatureMessageProcessor : Closeable {
     /**
      * Initializes the feature output stream provider to ensure it is ready for use.
      */
-    public open suspend fun initialize() { }
+    public open suspend fun initialize() {}
 
     /**
      * Handles an incoming feature message or event for processing.
      *
      * @param message the feature message to be handled.
      */
-    public abstract suspend fun processMessage(message: FeatureMessage)
+    protected abstract suspend fun processMessage(message: FeatureMessage)
+
+    /**
+     * Receives and processes an incoming feature message.
+     *
+     * This method evaluates the provided message using the configured message filter.
+     * If the message passes the filter, it is forwarded for further processing.
+     *
+     * @param message The incoming feature message to be evaluated and potentially processed.
+     */
+    public suspend fun onMessage(message: FeatureMessage) {
+        if (messageFilter(message)) {
+            processMessage(message)
+        }
+    }
 }

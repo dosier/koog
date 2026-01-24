@@ -42,7 +42,7 @@ The basic form of testing involves mocking LLM responses to ensure deterministic
 <!--- INCLUDE
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.testing.tools.getMockExecutor
-import ai.koog.agents.testing.tools.mockLLMAnswer
+
 
 val toolRegistry = ToolRegistry {}
 
@@ -69,99 +69,68 @@ import ai.koog.agents.ext.tool.SayToUser
 import ai.koog.agents.testing.tools.getMockExecutor
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.serializer
+import ai.koog.agents.core.tools.annotations.LLMDescription
 
-public object CreateTool : Tool<CreateTool.Args, CreateTool.Result>() {
-/**
-* Represents the arguments for the [AskUser] tool
-*
-* @property message The message to be used as an argument for the tool's execution.
-*/
-@Serializable
-public data class Args(val message: String) : ToolArgs
-
+public object CreateTool : Tool<CreateTool.Args, String>(
+    argsSerializer = Args.serializer(),
+    resultSerializer = String.serializer(),
+    name = "message",
+    description = "Service tool, used by the agent to talk with user"
+) {
+    /**
+    * Represents the arguments for the [AskUser] tool
+    *
+    * @property message The message to be used as an argument for the tool's execution.
+    */
     @Serializable
-    public data class Result(val message: String) : ToolResult {
-        override fun toStringDefault() = message
-    }
-
-    override val argsSerializer: KSerializer<Args> = Args.serializer()
-
-    override val descriptor: ToolDescriptor = ToolDescriptor(
-        name = "message",
-        description = "Service tool, used by the agent to talk with user",
-        requiredParameters = listOf(
-            ToolParameterDescriptor(
-                name = "message", description = "Message from the agent", type = ToolParameterType.String
-            )
-        )
+    public data class Args(
+        @property:LLMDescription("Message from the agent")
+        val message: String
     )
 
-    override suspend fun execute(args: Args): Result {
-        return Result(args.message)
-    }
+    override suspend fun execute(args: Args): String = args.message
 }
 
-public object SearchTool : Tool<SearchTool.Args, SearchTool.Result>() {
-/**
-* Represents the arguments for the [AskUser] tool
-*
-* @property message The message to be used as an argument for the tool's execution.
-*/
-@Serializable
-public data class Args(val query: String) : ToolArgs
-
+public object SearchTool : Tool<SearchTool.Args, String>(
+    argsSerializer = Args.serializer(),
+    resultSerializer = String.serializer(),
+    name = "message",
+    description = "Service tool, used by the agent to talk with user"
+) {
+    /**
+    * Represents the arguments for the [AskUser] tool
+    *
+    * @property message The message to be used as an argument for the tool's execution.
+    */
     @Serializable
-    public data class Result(val message: String) : ToolResult {
-        override fun toStringDefault() = message
-    }
-
-    override val argsSerializer: KSerializer<Args> = Args.serializer()
-
-    override val descriptor: ToolDescriptor = ToolDescriptor(
-        name = "message",
-        description = "Service tool, used by the agent to talk with user",
-        requiredParameters = listOf(
-            ToolParameterDescriptor(
-                name = "message", description = "Message from the agent", type = ToolParameterType.String
-            )
-        )
+    public data class Args(
+        @property:LLMDescription("Message from the agent")
+        val query: String
     )
 
-    override suspend fun execute(args: Args): Result {
-        return Result(args.query)
-    }
+    override suspend fun execute(args: Args): String = args.query
 }
 
 
-public object AnalyzeTool : Tool<AnalyzeTool.Args, AnalyzeTool.Result>() {
-/**
-* Represents the arguments for the [AskUser] tool
-*
-* @property message The message to be used as an argument for the tool's execution.
-*/
-@Serializable
-public data class Args(val message: String) : ToolArgs
-
+public object AnalyzeTool : Tool<AnalyzeTool.Args, String>(
+    argsSerializer = Args.serializer(),
+    resultSerializer = String.serializer(),
+    name = "message",
+    description = "Service tool, used by the agent to talk with user"
+) {
+    /**
+    * Represents the arguments for the [AskUser] tool
+    *
+    * @property message The message to be used as an argument for the tool's execution.
+    */
     @Serializable
-    public data class Result(val message: String) : ToolResult {
-        override fun toStringDefault() = message
-    }
-
-    override val argsSerializer: KSerializer<Args> = Args.serializer()
-
-    override val descriptor: ToolDescriptor = ToolDescriptor(
-        name = "message",
-        description = "Service tool, used by the agent to talk with user",
-        requiredParameters = listOf(
-            ToolParameterDescriptor(
-                name = "message", description = "Message from the agent", type = ToolParameterType.String
-            )
-        )
+    public data class Args(
+        @property:LLMDescription("Message from the agent")
+        val query: String
     )
 
-    override suspend fun execute(args: Args): Result {
-        return Result(args.message)
-    }
+    override suspend fun execute(args: Args): String = args.query
 }
 
 typealias PositiveToneTool = SayToUser
@@ -189,10 +158,10 @@ mockTool(NegativeToneTool) alwaysTells {
 }
 
 // Mock tool behavior based on specific arguments
-mockTool(AnalyzeTool) returns AnalyzeTool.Result("Detailed analysis") onArguments AnalyzeTool.Args("analyze deeply")
+mockTool(AnalyzeTool) returns "Detailed analysis" onArguments AnalyzeTool.Args("analyze deeply")
 
 // Mock tool behavior with conditional argument matching
-mockTool(SearchTool) returns SearchTool.Result("Found results") onArgumentsMatching { args ->
+mockTool(SearchTool) returns "Found results" onArgumentsMatching { args ->
   args.query.contains("important")
 }
 ```
@@ -252,8 +221,7 @@ Start by validating the fundamental structure of your agent's graph:
 <!--- INCLUDE
 
 import ai.koog.agents.core.agent.AIAgent
-import ai.koog.agents.core.tools.ToolResult
-import ai.koog.agents.example.exampleCustomNodes11.ToolArgs
+import ai.koog.agents.core.environment.ReceivedToolResult
 import ai.koog.agents.example.exampleTesting02.mockLLMApi
 import ai.koog.agents.example.exampleTesting02.toolRegistry
 import ai.koog.agents.testing.feature.testGraph
@@ -294,7 +262,7 @@ AIAgent(
 
             // Assert nodes by name
             val askLLM = assertNodeByName<String, Message.Response>("callLLM")
-            val callTool = assertNodeByName<ToolArgs, ToolResult>("executeTool")
+            val callTool = assertNodeByName<Message.Tool.Call, ReceivedToolResult>("executeTool")
 
             // Assert node reachability
             assertReachable(start, askLLM)
@@ -381,29 +349,20 @@ import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.message.Message
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import ai.koog.agents.core.tools.annotations.LLMDescription
 
-object SolveTool : SimpleTool<SolveTool.Args>() {
+object SolveTool : SimpleTool<SolveTool.Args>(
+    argsSerializer = Args.serializer(),
+    name = "message",
+    description = "Service tool, used by the agent to talk with user"
+) {
     @Serializable
-    data class Args(val message: String) : ToolArgs
-
-    @Serializable
-    data class Result(val message: String) : ToolResult {
-        override fun toStringDefault() = message
-    }
-
-    override val argsSerializer: KSerializer<Args> = Args.serializer()
-
-    override val descriptor: ToolDescriptor = ToolDescriptor(
-        name = "message",
-        description = "Service tool, used by the agent to talk with user",
-        requiredParameters = listOf(
-            ToolParameterDescriptor(
-                name = "message", description = "Message from the agent", type = ToolParameterType.String
-            )
-        )
+    data class Args(
+        @property:LLMDescription("Message from the agent")
+        val message: String
     )
 
-    override suspend fun doExecute(args: Args): String {
+    override suspend fun execute(args: Args): String {
         return args.message
     }
 }
@@ -435,7 +394,7 @@ assertNodes {
     callTool withInput toolCallMessage(
         SolveTool,
         SolveTool.Args("solve")
-    ) outputs toolResult(SolveTool, "solved")
+    ) outputs toolResult(SolveTool, SolveTool.Args("solve"), "solved")
 }
 ```
 <!--- KNIT example-testing-07.kt -->
@@ -458,32 +417,24 @@ import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.message.Message
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.serializer
+import ai.koog.agents.core.tools.annotations.LLMDescription
 
-object AnalyzeTool : Tool<AnalyzeTool.Args, AnalyzeTool.Result>() {
+object AnalyzeTool : Tool<AnalyzeTool.Args, String>(
+    argsSerializer = Args.serializer(),
+    resultSerializer = String.serializer(),
+    name = "message",
+    description = "Service tool, used by the agent to talk with user"
+) {
 
     @Serializable
-    data class Args(val query: String, val depth: Int) : ToolArgs
-
-    @Serializable
-    data class Result(val message: String) : ToolResult {
-        override fun toStringDefault() = message
-    }
-
-    override val argsSerializer: KSerializer<Args> = Args.serializer()
-
-    override val descriptor: ToolDescriptor = ToolDescriptor(
-        name = "message",
-        description = "Service tool, used by the agent to talk with user",
-        requiredParameters = listOf(
-            ToolParameterDescriptor(
-                name = "message", description = "Message from the agent", type = ToolParameterType.String
-            )
-        )
+    data class Args(
+        @property:LLMDescription("Message from the agent")
+        val query: String,
+        val depth: Int
     )
 
-    override suspend fun execute(args: Args): Result {
-        return Result(args.query)
-    }
+    override suspend fun execute(args: Args): String = args.query
 }
 
 
@@ -537,26 +488,23 @@ import ai.koog.prompt.message.Message
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 
-object AnalyzeTool : Tool<AnalyzeTool.Args, AnalyzeTool.Result>() {
+object AnalyzeTool : Tool<AnalyzeTool.Args, AnalyzeTool.Result>(
+    argsSerializer = Args.serializer(),
+    resultSerializer = Result.serializer(),
+    name = "message",
+    description = "Service tool, used by the agent to talk with user"
+) {
     @Serializable
-    data class Args(val query: String, val depth: Int) : ToolArgs
+    data class Args(
+        val query: String,
+        val depth: Int
+    )
 
     @Serializable
-    data class Result(val analysis: String, val confidence: Double, val metadata: Map<String, String> = emptyMap()) :
-        ToolResult {
-        override fun toStringDefault() = serializer().toString()
-    }
-
-    override val argsSerializer: KSerializer<Args> = Args.serializer()
-
-    override val descriptor: ToolDescriptor = ToolDescriptor(
-        name = "message",
-        description = "Service tool, used by the agent to talk with user",
-        requiredParameters = listOf(
-            ToolParameterDescriptor(
-                name = "message", description = "Message from the agent", type = ToolParameterType.String
-            )
-        )
+    data class Result(
+        val analysis: String,
+        val confidence: Double,
+        val metadata: Map<String, String> = mapOf()
     )
 
     override suspend fun execute(args: Args): Result {
@@ -593,7 +541,7 @@ assertNodes {
     callTool withInput toolCallMessage(
         AnalyzeTool,
         AnalyzeTool.Args(query = "complex", depth = 5)
-    ) outputs toolResult(AnalyzeTool, AnalyzeTool.Result(
+    ) outputs toolResult(AnalyzeTool, AnalyzeTool.Args(query = "complex", depth = 5), AnalyzeTool.Result(
         analysis = "Detailed analysis",
         confidence = 0.95,
         metadata = mapOf("source" to "database", "timestamp" to "2023-06-15")
@@ -750,7 +698,8 @@ fun main() {
 assertEdges {
     // Test routing based on tool result content
     callTool withOutput toolResult(
-        AnalyzeTool, 
+        AnalyzeTool,
+        AnalyzeTool.Args(query = "parameters", depth = 3),
         AnalyzeTool.Result(analysis = "Needs more processing", confidence = 0.5)
     ) goesTo processResult
 }
@@ -797,12 +746,14 @@ fun main() {
 assertEdges {
     // Route to different nodes based on confidence level
     callTool withOutput toolResult(
-        AnalyzeTool, 
+        AnalyzeTool,
+        AnalyzeTool.Args(query = "parameters", depth = 3),
         AnalyzeTool.Result(analysis = "Complete", confidence = 0.9)
     ) goesTo finish
 
     callTool withOutput toolResult(
-        AnalyzeTool, 
+        AnalyzeTool,
+        AnalyzeTool.Args(query = "parameters", depth = 3),
         AnalyzeTool.Result(analysis = "Uncertain", confidence = 0.3)
     ) goesTo verifyResult
 }
@@ -844,7 +795,7 @@ fun testToneAgent() = runTest {
 
     // Create an event handler
     val eventHandler = EventHandler {
-        onToolCall { tool, args ->
+        onToolCallStarting { tool, args ->
             println("[DEBUG_LOG] Tool called: tool ${tool.name}, args $args")
             toolCalls.add(tool.name)
         }
@@ -966,7 +917,7 @@ fun testMultiSubgraphAgentStructure() = runTest {
             val sendToolResult by nodeLLMSendToolResult()
             val giveFeedback by node<String, String> { input ->
                 llm.writeSession {
-                    updatePrompt {
+                    appendPrompt {
                         user("Call tools! Don't chat!")
                     }
                 }
@@ -1135,7 +1086,7 @@ Use pattern matching methods:
 
 <!--- INCLUDE
 import ai.koog.agents.testing.tools.getMockExecutor
-import ai.koog.agents.testing.tools.mockLLMAnswer
+
 
 val promptExecutor = 
 -->

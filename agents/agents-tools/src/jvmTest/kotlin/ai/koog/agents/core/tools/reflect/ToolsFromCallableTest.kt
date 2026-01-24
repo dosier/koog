@@ -2,13 +2,12 @@
 
 package ai.koog.agents.core.tools.reflect
 
-import ai.koog.agents.core.tools.DirectToolCallsEnabler
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
 import ai.koog.agents.core.tools.annotations.LLMDescription
 import ai.koog.agents.core.tools.annotations.Tool
+import ai.koog.agents.core.tools.serialization.ToolJson
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -206,10 +205,8 @@ class MyTools : Tools {
 @OptIn(InternalAgentToolsApi::class)
 class ToolsFromCallableTest {
     companion object {
-        object ToolsEnabler : DirectToolCallsEnabler
-
         val tools = MyTools()
-        val json = Json
+        val json = ToolJson
 
         @JvmStatic
         fun testVariants(): Array<Arguments> {
@@ -311,11 +308,11 @@ class ToolsFromCallableTest {
         val tool = callable.asTool(json)
         val args = tool.decodeArgs(argumentJson)
         val result = runBlocking {
-            tool.execute(args, ToolsEnabler)
+            tool.execute(args)
         }
         assertEquals(
             expectedResult,
-            result.toStringDefault(),
+            tool.encodeResultToStringUnsafe(result),
             "Incorrect result for $callable with argument $argumentJson"
         )
     }

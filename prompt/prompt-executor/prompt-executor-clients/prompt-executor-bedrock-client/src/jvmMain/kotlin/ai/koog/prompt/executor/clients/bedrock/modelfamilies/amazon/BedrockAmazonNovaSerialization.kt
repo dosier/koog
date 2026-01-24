@@ -10,6 +10,7 @@ import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.streaming.StreamFrame
 import kotlin.time.Clock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -66,7 +67,7 @@ internal object BedrockAmazonNovaSerialization {
                             toolUse = NovaToolUse(
                                 toolUseId = msg.id ?: Uuid.random().toString(),
                                 name = msg.tool,
-                                input = msg.contentJson,
+                                input = msg.contentJsonResult.getOrElse { JsonObject(emptyMap()) },
                             )
                         )
                     )
@@ -161,9 +162,8 @@ internal object BedrockAmazonNovaSerialization {
         totalTokensCount = novaUsage?.totalTokens,
         inputTokensCount = novaUsage?.inputTokens,
         outputTokensCount = novaUsage?.outputTokens,
-        additionalInfo = mapOf(
-            "cacheReadInputTokenCount" to novaUsage?.cacheReadInputTokenCount.toString(),
-            "cacheWriteInputTokenCount" to novaUsage?.cacheWriteInputTokenCount.toString()
-        ).filterValues { it != "null" }
+        // Nova uses cacheWriteInputTokenCount for cache creation and cacheReadInputTokenCount for cache reads
+        cacheCreationTokens = novaUsage?.cacheWriteInputTokenCount,
+        cacheReadTokens = novaUsage?.cacheReadInputTokenCount,
     )
 }

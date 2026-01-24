@@ -2,8 +2,11 @@ package ai.koog.prompt.executor.clients.bedrock.modelfamilies.anthropic
 
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.prompt.dsl.Prompt
-import ai.koog.prompt.executor.clients.anthropic.AnthropicResponseContent
-import ai.koog.prompt.executor.clients.anthropic.AnthropicStreamResponse
+import ai.koog.prompt.executor.clients.anthropic.models.AnthropicContent
+import ai.koog.prompt.executor.clients.anthropic.models.AnthropicStreamDeltaContentType
+import ai.koog.prompt.executor.clients.anthropic.models.AnthropicStreamEventType
+import ai.koog.prompt.executor.clients.anthropic.models.AnthropicStreamResponse
+import ai.koog.prompt.executor.clients.anthropic.models.AnthropicUsage
 import ai.koog.prompt.executor.clients.bedrock.modelfamilies.BedrockAnthropicInvokeModel
 import ai.koog.prompt.executor.clients.bedrock.modelfamilies.BedrockAnthropicInvokeModelContent
 import ai.koog.prompt.executor.clients.bedrock.modelfamilies.BedrockAnthropicInvokeModelMessage
@@ -15,14 +18,17 @@ import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.streaming.StreamFrame
+import ai.koog.prompt.streaming.buildStreamFrameFlow
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.flow.Flow
 import kotlin.time.Clock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNamingStrategy
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
-import kotlin.uuid.ExperimentalUuidApi
 
 internal object BedrockAnthropicClaudeSerialization {
 
@@ -32,6 +38,7 @@ internal object BedrockAnthropicClaudeSerialization {
         ignoreUnknownKeys = true
         isLenient = true
         explicitNulls = false
+        namingStrategy = JsonNamingStrategy.SnakeCase
     }
 
     private fun buildMessagesHistory(prompt: Prompt): MutableList<BedrockAnthropicInvokeModelMessage> {
@@ -39,13 +46,12 @@ internal object BedrockAnthropicClaudeSerialization {
         prompt.messages.forEach { msg ->
             when (msg) {
                 is Message.User -> {
-                    require(msg.attachments.isEmpty()) {
-                        "Amazon Bedrock Anthropic requests currently supports text-only user messages"
+                    require(!msg.hasAttachments()) {
+                        "Amazon Bedrock requests to Anthropic models via InvokeModel currently support text-only user messages"
                     }
                     if (msg.content.isNotEmpty()) {
                         messages.add(
-                            BedrockAnthropicInvokeModelMessage(
-                                role = "user",
+                            BedrockAnthropicInvokeModelMessage.User(
                                 content = listOf(BedrockAnthropicInvokeModelContent.Text(text = msg.content))
                             )
                         )
@@ -55,9 +61,24 @@ internal object BedrockAnthropicClaudeSerialization {
                 is Message.Assistant -> {
                     if (msg.content.isNotEmpty()) {
                         messages.add(
-                            BedrockAnthropicInvokeModelMessage(
-                                role = "assistant",
+                            BedrockAnthropicInvokeModelMessage.Assistant(
                                 content = listOf(BedrockAnthropicInvokeModelContent.Text(text = msg.content))
+                            )
+                        )
+                    }
+                }
+
+                is Message.Reasoning -> {
+                    if (msg.content.isNotEmpty()) {
+                        messages.add(
+                            BedrockAnthropicInvokeModelMessage.Assistant(
+                                content = listOf(
+                                    BedrockAnthropicInvokeModelContent.Thinking(
+                                        signature = msg.encrypted
+                                            ?: error("Encrypted signature is required for reasoning messages but was null"),
+                                        thinking = msg.content
+                                    )
+                                )
                             )
                         )
                     }
@@ -66,8 +87,7 @@ internal object BedrockAnthropicClaudeSerialization {
                 is Message.Tool.Result -> {
                     if (msg.content.isNotEmpty()) {
                         messages.add(
-                            BedrockAnthropicInvokeModelMessage(
-                                role = "user",
+                            BedrockAnthropicInvokeModelMessage.User(
                                 content = listOf(
                                     BedrockAnthropicInvokeModelContent.ToolResult(
                                         toolUseId = msg.id!!,
@@ -82,13 +102,12 @@ internal object BedrockAnthropicClaudeSerialization {
                 is Message.Tool.Call -> {
                     if (msg.content.isNotEmpty()) {
                         messages.add(
-                            BedrockAnthropicInvokeModelMessage(
-                                role = "assistant",
+                            BedrockAnthropicInvokeModelMessage.Assistant(
                                 content = listOf(
                                     BedrockAnthropicInvokeModelContent.ToolCall(
                                         msg.id!!,
                                         msg.tool,
-                                        json.decodeFromString(msg.content)
+                                        msg.contentJsonResult.getOrElse { JsonObject(emptyMap()) }
                                     )
                                 )
                             )
@@ -167,101 +186,153 @@ internal object BedrockAnthropicClaudeSerialization {
         )
     }
 
-    @OptIn(ExperimentalUuidApi::class)
     internal fun parseAnthropicResponse(responseBody: String, clock: Clock = Clock.System): List<Message.Response> {
         val response = json.decodeFromString<BedrockAnthropicResponse>(responseBody)
 
         val inputTokens = response.usage?.inputTokens
         val outputTokens = response.usage?.outputTokens
         val totalTokens = inputTokens?.let { input -> outputTokens?.let { output -> input + output } }
+        // Extract cache metrics from Anthropic response via Bedrock
+        val cacheCreationTokens = response.usage?.cacheCreationInputTokens
+        val cacheReadTokens = response.usage?.cacheReadInputTokens
+        val metaInfo = ResponseMetaInfo.create(
+            clock,
+            totalTokensCount = totalTokens,
+            inputTokensCount = inputTokens,
+            outputTokensCount = outputTokens,
+            cacheCreationTokens = cacheCreationTokens,
+            cacheReadTokens = cacheReadTokens,
+        )
 
         return response.content.map { content ->
             when (content) {
-                is AnthropicResponseContent.Text -> Message.Assistant(
+                is AnthropicContent.Text -> Message.Assistant(
                     content = content.text,
                     finishReason = response.stopReason,
-                    metaInfo = ResponseMetaInfo.create(
-                        clock,
-                        totalTokensCount = totalTokens,
-                        inputTokensCount = inputTokens,
-                        outputTokensCount = outputTokens
-                    )
+                    metaInfo = metaInfo
                 )
 
-                is AnthropicResponseContent.ToolUse -> Message.Tool.Call(
+                is AnthropicContent.Thinking -> Message.Reasoning(
+                    encrypted = content.signature,
+                    content = content.thinking,
+                    metaInfo = metaInfo
+                )
+
+                is AnthropicContent.ToolUse -> Message.Tool.Call(
                     id = content.id,
                     tool = content.name,
                     content = content.input.toString(),
-                    metaInfo = ResponseMetaInfo.create(
-                        clock,
-                        totalTokensCount = totalTokens,
-                        inputTokensCount = inputTokens,
-                        outputTokensCount = outputTokens
-                    )
+                    metaInfo = metaInfo
                 )
+
+                else -> throw IllegalArgumentException("Unhandled AnthropicContent type. Content: $content")
             }
         }
     }
 
-    internal fun parseAnthropicStreamChunk(chunkJsonString: String, clock: Clock = Clock.System): List<StreamFrame> {
-        val streamResponse = json.decodeFromString<AnthropicStreamResponse>(chunkJsonString)
+    internal fun transformAnthropicStreamChunks(
+        chunkJsonStringFlow: Flow<String>,
+        clock: Clock = Clock.System
+    ): Flow<StreamFrame> = buildStreamFrameFlow {
+        var inputTokens: Int? = null
+        var outputTokens: Int? = null
+        var cacheCreationTokens: Int? = null
+        var cacheReadTokens: Int? = null
 
-        return when (streamResponse.type) {
-            "content_block_delta" -> {
-                streamResponse.delta?.let {
-                    buildList {
-                        it.text?.let(StreamFrame::Append)?.let(::add)
-                        it.toolUse?.let { toolUse ->
-                            StreamFrame.ToolCall(
-                                id = toolUse.id,
-                                name = toolUse.name,
-                                content = toolUse.input.toString()
+        fun updateUsage(usage: AnthropicUsage) {
+            inputTokens = usage.inputTokens ?: inputTokens
+            outputTokens = usage.outputTokens ?: outputTokens
+            cacheCreationTokens = usage.cacheCreationInputTokens ?: cacheCreationTokens
+            cacheReadTokens = usage.cacheReadInputTokens ?: cacheReadTokens
+        }
+
+        fun getMetaInfo(): ResponseMetaInfo = ResponseMetaInfo.create(
+            clock = clock,
+            totalTokensCount = inputTokens?.plus(outputTokens ?: 0) ?: outputTokens,
+            inputTokensCount = inputTokens,
+            outputTokensCount = outputTokens,
+            cacheCreationTokens = cacheCreationTokens,
+            cacheReadTokens = cacheReadTokens,
+        )
+
+        chunkJsonStringFlow.collect { chunkJsonString ->
+            val response = json.decodeFromString<AnthropicStreamResponse>(chunkJsonString)
+
+            when (response.type) {
+                AnthropicStreamEventType.MESSAGE_START.value -> {
+                    response.message?.usage?.let(::updateUsage)
+                }
+
+                AnthropicStreamEventType.CONTENT_BLOCK_START.value -> {
+                    when (val contentBlock = response.contentBlock) {
+                        is AnthropicContent.Text -> {
+                            emitAppend(contentBlock.text)
+                        }
+
+                        is AnthropicContent.ToolUse -> {
+                            upsertToolCall(
+                                index = response.index ?: error("Tool index is missing"),
+                                id = contentBlock.id,
+                                name = contentBlock.name,
                             )
-                        }?.let(::add)
+                        }
+
+                        else -> {
+                            contentBlock?.let { logger.warn { "Unknown Anthropic stream content block type: ${it::class}" } }
+                                ?: logger.warn { "Anthropic stream content block is missing" }
+                        }
                     }
-                } ?: emptyList()
-            }
+                }
 
-            "message_delta" -> {
-                streamResponse.message?.content?.map { content ->
-                    when (content) {
-                        is AnthropicResponseContent.Text ->
-                            StreamFrame.Append(content.text)
+                AnthropicStreamEventType.CONTENT_BLOCK_DELTA.value -> {
+                    response.delta?.let { delta ->
+                        // Handles deltas for tool calls and text
 
-                        is AnthropicResponseContent.ToolUse ->
-                            StreamFrame.ToolCall(
-                                id = content.id,
-                                name = content.name,
-                                content = content.input.toString()
-                            )
+                        when (delta.type) {
+                            AnthropicStreamDeltaContentType.INPUT_JSON_DELTA.value -> {
+                                upsertToolCall(
+                                    index = response.index ?: error("Tool index is missing"),
+                                    args = delta.partialJson ?: error("Tool args are missing")
+                                )
+                            }
+
+                            AnthropicStreamDeltaContentType.TEXT_DELTA.value -> {
+                                emitAppend(
+                                    delta.text ?: error("Text delta is missing")
+                                )
+                            }
+
+                            else -> {
+                                logger.warn { "Unknown Anthropic stream delta type: ${delta.type}" }
+                            }
+                        }
                     }
-                } ?: emptyList()
-            }
+                }
 
-            "message_start" -> {
-                val inputTokens = streamResponse.message?.usage?.inputTokens
-                logger.debug { "Bedrock stream starts. Input tokens: $inputTokens" }
-                emptyList()
-            }
+                AnthropicStreamEventType.CONTENT_BLOCK_STOP.value -> {
+                    tryEmitPendingToolCall()
+                }
 
-            "message_stop" -> {
-                val inputTokens = streamResponse.message?.usage?.inputTokens
-                val outputTokens = streamResponse.message?.usage?.outputTokens
-                logger.debug { "Bedrock stream stops. Output tokens: $outputTokens" }
-                listOf(
-                    StreamFrame.End(
-                        finishReason = streamResponse.message?.stopReason,
-                        metaInfo = ResponseMetaInfo.create(
-                            clock = clock,
-                            totalTokensCount = inputTokens?.let { it + (outputTokens ?: 0) } ?: outputTokens,
-                            inputTokensCount = inputTokens,
-                            outputTokensCount = outputTokens
-                        )
+                AnthropicStreamEventType.MESSAGE_DELTA.value -> {
+                    response.usage?.let(::updateUsage)
+                    emitEnd(
+                        finishReason = response.delta?.stopReason,
+                        metaInfo = getMetaInfo()
                     )
-                )
-            }
+                }
 
-            else -> emptyList()
+                AnthropicStreamEventType.MESSAGE_STOP.value -> {
+                    logger.debug { "Received stop message event from Anthropic" }
+                }
+
+                AnthropicStreamEventType.ERROR.value -> {
+                    error("Anthropic error: ${response.error}")
+                }
+
+                AnthropicStreamEventType.PING.value -> {
+                    logger.debug { "Received ping from Anthropic" }
+                }
+            }
         }
     }
 }

@@ -4,9 +4,15 @@ import ai.koog.agents.core.agent.config.AIAgentConfig
 import ai.koog.agents.core.agent.entity.AIAgentStateManager
 import ai.koog.agents.core.agent.entity.AIAgentStorage
 import ai.koog.agents.core.agent.entity.AIAgentStorageKey
+import ai.koog.agents.core.agent.execution.AgentExecutionInfo
+import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.core.environment.AIAgentEnvironment
 import ai.koog.agents.core.feature.AIAgentFeature
+import ai.koog.agents.core.feature.pipeline.AIAgentPipeline
 import ai.koog.prompt.message.Message
+import kotlin.reflect.KClass
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * The [AIAgentContext] interface represents the context of an AI agent in the lifecycle.
@@ -26,12 +32,14 @@ public interface AIAgentContext {
     public val environment: AIAgentEnvironment
 
     /**
-     * Represents the unique identifier for the agent.
-     *
-     * This identifier is used to distinguish between different agents and is essential
-     * for tracking and managing the agent's lifecycle, especially in multi-agent scenarios.
+     * A unique identifier representing the current agent instance within the context.
      */
     public val agentId: String
+
+    /**
+     * Represents the pipeline associated with the AI agent.
+     */
+    public val pipeline: AIAgentPipeline
 
     /**
      * A unique identifier for the current session associated with the AI agent context.
@@ -72,7 +80,7 @@ public interface AIAgentContext {
      * This variable provides synchronized access to the agent's state to ensure thread safety
      * and consistent state transitions during concurrent operations. It acts as a central
      * mechanism for managing state updates and validations across different
-     * nodes and subgraphes of the AI agent's execution flow.
+     * nodes and subgraphs of the AI agent's execution flow.
      *
      * The [stateManager] is utilized extensively in coordinating state changes, such as
      * tracking the number of iterations made by the agent and enforcing execution limits
@@ -83,7 +91,7 @@ public interface AIAgentContext {
 
     /**
      * Concurrent-safe key-value storage for an agent, used to manage and persist data within the context of
-     * a the AI agent stage execution. The `storage` property provides a thread-safe mechanism for sharing
+     *  the AI agent stage execution. The `storage` property provides a thread-safe mechanism for sharing
      * and storing data specific to the agent's operation.
      */
     public val storage: AIAgentStorage
@@ -92,6 +100,17 @@ public interface AIAgentContext {
      * Represents the name of the strategy being used in the current AI agent context.
      */
     public val strategyName: String
+
+    /**
+     * Represents the parent context of the AI Agent.
+     */
+    @InternalAgentsApi
+    public val parentContext: AIAgentContext?
+
+    /**
+     * Represents the observability data associated with the AI Agent context.
+     */
+    public var executionInfo: AgentExecutionInfo
 
     /**
      * Stores a feature in the agent's storage using the specified key.
@@ -118,38 +137,18 @@ public interface AIAgentContext {
     public fun remove(key: AIAgentStorageKey<*>): Boolean
 
     /**
-     * Retrieves a feature from the current context using the specified key.
-     *
-     * @param key A uniquely identifying key of type `AIAgentStorageKey` used to fetch the corresponding feature.
-     * @return The feature associated with the provided key, or null if no matching feature is found.
-     */
-    public fun <Feature : Any> feature(key: AIAgentStorageKey<Feature>): Feature?
-
-    /**
-     * Retrieves a feature of the specified type from the current context.
-     *
-     * @param feature The [AIAgentFeature] instance representing the feature to retrieve.
-     *                This parameter defines the configuration and unique identity of the feature.
-     * @return The feature instance of type [Feature], or null if the feature is not available in the context.
-     */
-    public fun <Feature : Any> feature(feature: AIAgentFeature<*, Feature>): Feature?
-
-    /**
-     * Retrieves a feature of the specified type from the context or throws an exception if it is not available.
-     *
-     * @param feature The [AIAgentFeature] defining the specific feature to be retrieved. This provides
-     *                the configuration and unique identification of the feature.
-     * @return The instance of the requested feature of type [Feature].
-     * @throws IllegalStateException if the requested feature is not installed in the agent.
-     */
-    public fun <Feature : Any> featureOrThrow(feature: AIAgentFeature<*, Feature>): Feature =
-        feature(feature)
-            ?: throw IllegalStateException("Feature `${feature::class.simpleName}` is not installed to the agent")
-
-    /**
      * Retrieves the history of messages exchanged during the agent's execution.
      */
     public suspend fun getHistory(): List<Message>
+
+    /**
+     * Checks if the list of `Message.Response` contains any instances
+     * of `Message.Tool.Call`.
+     *
+     * @receiver A list of `Message.Response` objects to evaluate.
+     * @return `true` if there is at least one `Message.Tool.Call` in the list, otherwise `false`.
+     */
+    public fun List<Message.Response>.containsToolCalls(): Boolean = this.any { it is Message.Tool.Call }
 }
 
 /**
@@ -159,3 +158,85 @@ public interface AIAgentContext {
  */
 public inline fun <reified T> AIAgentContext.agentInput(): T =
     agentInput as? T ?: throw ClassCastException("Can't cast agent input to ${T::class}. Agent input: $agentInput")
+
+/**
+ * Provides the root context of the current agent.
+ * If the root context is not defined, this function defaults to returning the current instance.
+ *
+ * @return The root context of type [AIAgentContext], or the current instance if the root context is null.
+ */
+@OptIn(InternalAgentsApi::class)
+public fun AIAgentContext.rootContext(): AIAgentContext = this.parentContext?.rootContext() ?: this
+
+/**
+ * Retrieves a feature from the [AIAgentContext.pipeline] associated with this context using the specified key.
+ *
+ * @param TFeature A feature implementation type.
+ * @param feature A feature to fetch.
+ * @param featureClass The [KClass] of the feature to be retrieved.
+ * @return The feature associated with the provided key, or null if no matching feature is found.
+ * @throws IllegalArgumentException if the specified [featureClass] does not correspond to a registered feature.
+ */
+public fun <TFeature : Any> AIAgentContext.feature(
+    featureClass: KClass<TFeature>,
+    feature: AIAgentFeature<*, TFeature>
+): TFeature? = pipeline.feature(featureClass, feature)
+
+/**
+ * Retrieves a feature from the [AIAgentContext.pipeline] associated with this context using the specified key.
+ *
+ * @param feature A feature to fetch.
+ * @return The feature associated with the provided key, or null if no matching feature is found.
+ * @throws IllegalArgumentException if the specified [feature] does not correspond to a registered feature.
+ */
+public inline fun <reified TFeature : Any> AIAgentContext.feature(feature: AIAgentFeature<*, TFeature>): TFeature? =
+    feature(TFeature::class, feature)
+
+/**
+ * Retrieves a feature from the [AIAgentContext.pipeline] associated with this context using the specified key or throws
+ * an exception if it is not available.
+ *
+ * @param feature A feature to fetch.
+ * @return The feature associated with the provided key
+ * @throws IllegalStateException if the [TFeature] feature does not correspond to a registered feature.
+ * @throws NoSuchElementException if the feature is not found.
+ */
+public inline fun <reified TFeature : Any> AIAgentContext.featureOrThrow(feature: AIAgentFeature<*, TFeature>): TFeature =
+    feature(feature) ?: throw NoSuchElementException("Feature ${feature.key} is not found.")
+
+/**
+ * Executes a block of code with a modified execution context.
+ *
+ * @param T The return type of the block being executed.
+ * @param executionInfo The execution info to be set for the context.
+ * @param block The suspend function to execute with the modified execution context.
+ * @return The result of executing the provided block.
+ */
+public inline fun <T> AIAgentContext.with(executionInfo: AgentExecutionInfo, block: (executionInfo: AgentExecutionInfo, eventId: String) -> T): T {
+    val originalExecutionInfo = this.executionInfo
+
+    // Unique id for a group of events, e.g., agent events, node events, etc.
+    @OptIn(ExperimentalUuidApi::class)
+    val eventId = Uuid.random().toString()
+
+    return try {
+        this.executionInfo = executionInfo
+        block(executionInfo, eventId)
+    } finally {
+        this.executionInfo = originalExecutionInfo
+    }
+}
+
+/**
+ * Executes a block of code with a modified execution context, creating a parent-child relationship
+ * between execution contexts for tracing purposes.
+ *
+ * @param T The return type of the block being executed.
+ * @param partName The name of the execution part to append to the execution path.
+ * @param block The suspend function to execute with the modified execution context.
+ * @return The result of executing the provided block.
+ */
+public inline fun <T> AIAgentContext.with(partName: String, block: (executionInfo: AgentExecutionInfo, eventId: String) -> T): T {
+    val executionInfo = AgentExecutionInfo(parent = this.executionInfo, partName = partName)
+    return with(executionInfo = executionInfo, block = block)
+}

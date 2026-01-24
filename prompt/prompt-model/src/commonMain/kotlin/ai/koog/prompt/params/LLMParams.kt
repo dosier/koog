@@ -2,7 +2,11 @@ package ai.koog.prompt.params
 
 import ai.koog.prompt.llm.LLMCapability
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Represents configuration parameters for controlling the behavior of a language model.
@@ -19,15 +23,10 @@ import kotlinx.serialization.json.JsonObject
  * @property schema Defines the structure for the model's structured response format.
  * @property toolChoice Used to switch tool calling behavior of LLM.
  * @property user An optional identifier for the user making the request, which can be used for tracking purposes.
- * @property includeThoughts If `true`, requests the model to add reasoning blocks to the response.
- * Defaults to `null`.
- * When set to `true`, responses may include detailed reasoning steps.
- * When `false` or `null`, responses are typically shorter and faster.
- * @property thinkingBudget Hard cap for reasoning tokens.
- * Ignored by models that don't support budgets.
- * This can be used to limit the amount of tokens used for reasoning when `includeThoughts` is enabled.
+ * @property additionalProperties Additional properties that can be used to store custom parameters.
  */
 @Serializable
+@Suppress("LongParameterList")
 public open class LLMParams(
     public val temperature: Double? = null,
     public val maxTokens: Int? = null,
@@ -36,8 +35,7 @@ public open class LLMParams(
     public val schema: Schema? = null,
     public val toolChoice: ToolChoice? = null,
     public val user: String? = null,
-    public val includeThoughts: Boolean? = null,
-    public val thinkingBudget: Int? = null,
+    public val additionalProperties: Map<String, JsonElement>? = null,
 ) {
     init {
         temperature?.let { temp ->
@@ -75,8 +73,7 @@ public open class LLMParams(
         schema = schema ?: default.schema,
         toolChoice = toolChoice ?: default.toolChoice,
         user = user ?: default.user,
-        includeThoughts = includeThoughts ?: default.includeThoughts,
-        thinkingBudget = thinkingBudget ?: default.thinkingBudget,
+        additionalProperties = additionalProperties ?: default.additionalProperties,
     )
 
     /**
@@ -90,8 +87,7 @@ public open class LLMParams(
         schema: Schema? = this.schema,
         toolChoice: ToolChoice? = this.toolChoice,
         user: String? = this.user,
-        includeThoughts: Boolean? = this.includeThoughts,
-        thinkingBudget: Int? = this.thinkingBudget,
+        additionalProperties: Map<String, JsonElement>? = this.additionalProperties,
     ): LLMParams = LLMParams(
         temperature = temperature,
         maxTokens = maxTokens,
@@ -100,22 +96,61 @@ public open class LLMParams(
         schema = schema,
         toolChoice = toolChoice,
         user = user,
-        includeThoughts = includeThoughts,
-        thinkingBudget = thinkingBudget,
+        additionalProperties = additionalProperties,
     )
 
     /**
-     * Component functions for destructuring declarations
+     * Retrieves the value of the temperature as a nullable Double.
+     * This function is typically used in destructuring declarations.
+     *
+     * @return the temperature value, which may be null
      */
     public operator fun component1(): Double? = temperature
+
+    /**
+     * Provides the second component of the object, corresponding to maxTokens.
+     *
+     * @return The value of maxTokens, or null if not set.
+     */
     public operator fun component2(): Int? = maxTokens
+
+    /**
+     * Retrieves the third component of the data structure, representing the number of choices.
+     *
+     * @return The number of choices as an [Int] if available, or null otherwise.
+     */
     public operator fun component3(): Int? = numberOfChoices
+
+    /**
+     * Retrieves the fourth component of the data structure.
+     *
+     * @return the fourth component of the data as a nullable String, or null if not available.
+     */
     public operator fun component4(): String? = speculation
+
+    /**
+     * Provides the fifth component of the data structure, represented by the `schema` property.
+     *
+     * @return The `schema` of type `Schema?`, or null if it is not set.
+     */
     public operator fun component5(): Schema? = schema
+
+    /**
+     * Retrieves the sixth component of a destructured object, which represents a tool choice.
+     *
+     * @return The tool choice associated with this component, or null if not set.
+     */
     public operator fun component6(): ToolChoice? = toolChoice
+
+    /**
+     * Retrieves the seventh component of the data class, typically used for destructuring declarations.
+     *
+     * @return The seventh component as a nullable String, or null if not available.
+     */
     public operator fun component7(): String? = user
-    public operator fun component8(): Boolean? = includeThoughts
-    public operator fun component9(): Int? = thinkingBudget
+
+    @Suppress("MissingKDocForPublicAPI")
+    public operator fun component10(): Map<String, JsonElement>? = additionalProperties
 
     override fun equals(other: Any?): Boolean = when {
         this === other -> true
@@ -128,14 +163,17 @@ public open class LLMParams(
                 schema == other.schema &&
                 toolChoice == other.toolChoice &&
                 user == other.user &&
-                includeThoughts == other.includeThoughts &&
-                thinkingBudget == other.thinkingBudget
+                additionalProperties == other.additionalProperties
     }
 
     override fun hashCode(): Int = listOf(
-        temperature, maxTokens, numberOfChoices,
-        speculation, schema, toolChoice,
-        user, includeThoughts, thinkingBudget
+        temperature,
+        maxTokens,
+        numberOfChoices,
+        speculation,
+        schema,
+        toolChoice,
+        user
     ).fold(0) { acc, element ->
         31 * acc + (element?.hashCode() ?: 0)
     }
@@ -149,8 +187,7 @@ public open class LLMParams(
         append(", schema=$schema")
         append(", toolChoice=$toolChoice")
         append(", user=$user")
-        append(", includeThoughts=$includeThoughts")
-        append(", thinkingBudget=$thinkingBudget")
+        append(", additionalProperties=$additionalProperties")
         append(")")
     }
 
@@ -227,6 +264,39 @@ public open class LLMParams(
     }
 
     /**
+     * Controls provider-level prompt caching behavior.
+     *
+     * Provider-level caching stores input tokens on the LLM provider's servers,
+     * enabling faster processing (>2x latency reduction) and cost savings (up to 90%)
+     * for repeated prompts with static prefixes.
+     *
+     * **Supported providers:**
+     * - **Anthropic/Claude**: Explicit opt-in via `cache_control` on content blocks
+     * - **OpenAI**: Automatic caching for prompts > 1,024 tokens
+     * - **AWS Bedrock**: Cache checkpoints for supported models
+     *
+     * **Note**: This is different from application-level response caching (see `prompt-cache` module).
+     */
+    @Serializable
+    public sealed interface CacheControl {
+        /**
+         * Ephemeral cache with short TTL (typically 5 minutes).
+         * Cache is refreshed each time the cached content is used.
+         * This is the default and most cost-effective option for most use cases.
+         */
+        @Serializable
+        public data object Ephemeral : CacheControl
+
+        /**
+         * Extended cache with longer TTL (typically 1 hour).
+         * Available on Anthropic at additional cost (2x base input token price for cache writes).
+         * Useful for batch processing or when cache hits are expected over longer periods.
+         */
+        @Serializable
+        public data object Extended : CacheControl
+    }
+
+    /**
      * Used to switch tool calling behavior of LLM
      */
     @Serializable
@@ -259,4 +329,23 @@ public open class LLMParams(
         @Serializable
         public object Required : ToolChoice()
     }
+}
+
+/**
+ * Converts a variable number of pairs into a map where the values are transformed into JsonElement instances.
+ *
+ * @param pairs A variable number of key-value pairs, where the keys are strings and the values are any type.
+ * @return A map with the provided keys associated with their corresponding JsonElement representations as values.
+ */
+public fun additionalPropertiesOf(vararg pairs: Pair<String, Any>): Map<String, JsonElement> =
+    pairs.associate { (k, v) -> k to toJsonElement(v) }
+
+private fun toJsonElement(v: Any?): JsonElement = when (v) {
+    null -> JsonNull
+    is String -> JsonPrimitive(v)
+    is Number -> JsonPrimitive(v)
+    is Boolean -> JsonPrimitive(v)
+    is Iterable<*> -> JsonArray(v.map { toJsonElement(it) })
+    is Map<*, *> -> JsonObject(v.entries.associate { (k, value) -> k.toString() to toJsonElement(value) })
+    else -> JsonPrimitive(v.toString())
 }

@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalUuidApi::class, InternalAgentsApi::class)
+@file:OptIn(InternalAgentsApi::class)
 
 package ai.koog.agents.testing.feature
 
@@ -16,19 +16,18 @@ import ai.koog.agents.core.agent.entity.AIAgentStorageKey
 import ai.koog.agents.core.agent.entity.AIAgentSubgraph
 import ai.koog.agents.core.agent.entity.FinishNode
 import ai.koog.agents.core.agent.entity.createStorageKey
+import ai.koog.agents.core.agent.execution.AgentExecutionInfo
 import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.core.environment.AIAgentEnvironment
 import ai.koog.agents.core.environment.ReceivedToolResult
+import ai.koog.agents.core.environment.ToolResultKind
 import ai.koog.agents.core.feature.AIAgentGraphFeature
-import ai.koog.agents.core.feature.AIAgentGraphPipeline
-import ai.koog.agents.core.feature.AIAgentPipeline
-import ai.koog.agents.core.feature.InterceptContext
-import ai.koog.agents.core.feature.PromptExecutorProxy
+import ai.koog.agents.core.feature.ContextualPromptExecutor
 import ai.koog.agents.core.feature.config.FeatureConfig
+import ai.koog.agents.core.feature.pipeline.AIAgentGraphPipeline
+import ai.koog.agents.core.feature.pipeline.AIAgentPipeline
 import ai.koog.agents.core.tools.SimpleTool
 import ai.koog.agents.core.tools.Tool
-import ai.koog.agents.core.tools.ToolArgs
-import ai.koog.agents.core.tools.ToolResult
 import ai.koog.agents.testing.tools.AIAgentContextMockBuilder
 import ai.koog.agents.testing.tools.AIAgentContextMockBuilderBase
 import ai.koog.agents.testing.tools.DummyAIAgentContext
@@ -39,7 +38,6 @@ import ai.koog.prompt.tokenizer.Tokenizer
 import kotlin.time.Clock
 import org.jetbrains.annotations.TestOnly
 import kotlin.reflect.KType
-import kotlin.uuid.ExperimentalUuidApi
 
 /**
  * Represents a reference to a specific type of node within an AI agent subgraph. This sealed class
@@ -540,9 +538,9 @@ public class Testing {
             internal val tokenizer: Tokenizer?,
         ) {
 
-            private val start: NodeReference.Start<Input> = NodeReference.Start<Input>()
+            private val start: NodeReference.Start<Input> = NodeReference.Start()
 
-            private val finish: NodeReference.Finish<Output> = NodeReference.Finish<Output>()
+            private val finish: NodeReference.Finish<Output> = NodeReference.Finish()
 
             /**
              * Stores a mapping of node names to their corresponding references.
@@ -761,6 +759,7 @@ public class Testing {
                     storage: AIAgentStorage?,
                     runId: String?,
                     strategyName: String?,
+                    executionInfo: AgentExecutionInfo?,
                 ): NodeOutputAssertionsBuilder =
                     NodeOutputAssertionsBuilder(stageBuilder, context.copy())
 
@@ -869,6 +868,7 @@ public class Testing {
                     storage: AIAgentStorage?,
                     runId: String?,
                     strategyName: String?,
+                    executionInfo: AgentExecutionInfo?,
                 ): EdgeAssertionsBuilder = EdgeAssertionsBuilder(stageBuilder, context.copy())
 
                 /**
@@ -924,57 +924,37 @@ public class Testing {
     }
 
     /**
-     * Companion object that defines the `Testing` feature as a `AIAgentFeature`.
-     * This feature provides testing capabilities for validating graph-based stages, nodes,
-     * reachability, outputs, and edges within an AI agent pipeline.
+     * Companion object implementing agent feature, handling [Testing] creation and installation.
      */
     @TestOnly
     public companion object Feature : AIAgentGraphFeature<Config, Testing> {
-        /**
-         * A storage key uniquely identifying the `Testing` feature within the local agent's storage.
-         * The key is generated using the `createStorageKey` function and associates the
-         * `Testing` feature type with its specific storage context.
-         */
         override val key: AIAgentStorageKey<Testing> = createStorageKey("graph-testing-feature")
 
-        /**
-         * Creates the initial configuration for the graph testing feature.
-         *
-         * @return an instance of [Config] containing the initial setup for assertions and stage configuration.
-         */
         override fun createInitialConfig(): Config = Config()
 
-        /**
-         * Installs the `Testing` feature into the specified `AIAgentPipeline` with the provided configuration.
-         * The feature primarily validates stages, nodes, and connectivity of the AI agent pipeline.
-         *
-         * @param config The `Config` object containing setup and assertions for testing the pipeline.
-         * @param pipeline The `AIAgentPipeline` instance to install the feature into.
-         */
         override fun install(
             config: Config,
-            pipeline: AIAgentGraphPipeline
-        ) {
-            val feature = Testing()
-            val interceptContext = InterceptContext(this, feature)
-            pipeline.interceptEnvironmentCreated(interceptContext) { agentEnvironment ->
+            pipeline: AIAgentGraphPipeline,
+        ): Testing {
+            val testing = Testing()
+            pipeline.interceptEnvironmentCreated(this) { agentEnvironment ->
                 MockEnvironment(agent.toolRegistry, agent.promptExecutor, agentEnvironment)
             }
 
             if (config.enableGraphTesting) {
-                feature.graphAssertions.add(config.getAssertions())
+                testing.graphAssertions.add(config.getAssertions())
 
                 var agent: AIAgent<*, *>? = null
 
-                pipeline.interceptBeforeAgentStarted(interceptContext) { eventContext ->
+                pipeline.interceptAgentStarting(this) { eventContext ->
                     agent = eventContext.agent
                 }
 
-                pipeline.interceptStrategyStarted(interceptContext) { eventContext ->
+                pipeline.interceptStrategyStarting(this) { eventContext ->
                     val agentToUse = agent as GraphAIAgent<*, *>
                     val strategyGraph = eventContext.strategy as AIAgentGraphStrategy<*, *>
 
-                    val strategyAssertions = feature.graphAssertions.find { it.name == strategyGraph.name }
+                    val strategyAssertions = testing.graphAssertions.find { it.name == strategyGraph.name }
                     config.assert(
                         strategyAssertions != null,
                         "Assertions for strategyGraph with name `${strategyGraph.name}` not found in configuration."
@@ -990,6 +970,8 @@ public class Testing {
                     )
                 }
             }
+
+            return testing
         }
 
         private suspend fun <Input, Output> verifyGraph(
@@ -1038,10 +1020,10 @@ public class Testing {
                         tools = agent.toolRegistry.tools.map { it.descriptor },
                         prompt = agent.agentConfig.prompt,
                         model = agent.agentConfig.model,
-                        promptExecutor = PromptExecutorProxy(
-                            agent.promptExecutor,
-                            pipeline,
-                            assertion.context.runId,
+                        responseProcessor = agent.agentConfig.responseProcessor,
+                        promptExecutor = ContextualPromptExecutor(
+                            executor = agent.promptExecutor,
+                            context = assertion.context,
                         ),
                         environment = environment,
                         config = agent.agentConfig,
@@ -1146,33 +1128,6 @@ public class Testing {
                 throw AssertionError(message)
             }
         }
-
-        /**
-         * Compares two lists and throws an AssertionError if they are not equal, with a specified error message.
-         *
-         * @param expected The expected list of elements.
-         * @param actual The actual list of elements to compare against the expected list.
-         * @param message The message to include in the assertion error if the lists are not equal.
-         */
-        private fun assertListEquals(expected: List<*>, actual: List<*>, message: String) {
-            if (expected != actual) {
-                throw AssertionError(message)
-            }
-        }
-
-        /**
-         * Asserts that the given two values are equal. If they are not equal, it throws an AssertionError
-         * with the provided message.
-         *
-         * @param expected the expected value to compare
-         * @param actual the actual value to compare against the expected value
-         * @param message the assertion failure message to include in the exception if the values are not equal
-         */
-        private fun assertValueEquals(expected: Any?, actual: Any?, message: String) {
-            if (expected != actual) {
-                throw AssertionError(message)
-            }
-        }
     }
 }
 
@@ -1198,7 +1153,7 @@ public class Testing {
  * }
  * ```
  */
-public fun <Args : ToolArgs> Testing.Config.SubgraphAssertionsBuilder<*, *>.toolCallMessage(
+public fun <Args> Testing.Config.SubgraphAssertionsBuilder<*, *>.toolCallMessage(
     tool: Tool<Args, *>,
     args: Args
 ): Message.Tool.Call {
@@ -1254,8 +1209,16 @@ public fun Testing.Config.SubgraphAssertionsBuilder<*, *>.assistantMessage(
  * }
  * ```
  */
-public fun <Result : ToolResult> toolResult(tool: Tool<*, Result>, result: Result): ReceivedToolResult =
-    ReceivedToolResult(null, tool.name, tool.encodeResultToString(result), result)
+public fun <TArgs, TResult> toolResult(tool: Tool<TArgs, TResult>, args: TArgs, result: TResult): ReceivedToolResult =
+    ReceivedToolResult(
+        id = null,
+        tool = tool.name,
+        toolArgs = tool.encodeArgs(args),
+        toolDescription = tool.descriptor.description,
+        content = tool.encodeResultToString(result),
+        resultKind = ToolResultKind.Success,
+        result = tool.encodeResult(result)
+    )
 
 /**
  * Constructs a `ReceivedToolResult` object using the provided tool and result string.
@@ -1278,8 +1241,16 @@ public fun <Result : ToolResult> toolResult(tool: Tool<*, Result>, result: Resul
  * }
  * ```
  */
-public fun toolResult(tool: SimpleTool<*>, result: String): ReceivedToolResult =
-    toolResult(tool, ToolResult.Text(result))
+public fun <TArgs> toolResult(tool: SimpleTool<TArgs>, args: TArgs, result: String): ReceivedToolResult =
+    ReceivedToolResult(
+        id = null,
+        tool = tool.name,
+        toolArgs = tool.encodeArgs(args),
+        toolDescription = tool.descriptor.description,
+        content = tool.encodeResultToString(result),
+        resultKind = ToolResultKind.Success,
+        result = tool.encodeResult(result)
+    )
 
 /**
  * Enables and configures the Testing feature for a Kotlin AI Agent instance.

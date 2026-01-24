@@ -86,9 +86,7 @@ runBlocking {
     // Create the ToolRegistry with tools from the MCP server
     val toolRegistry = McpToolRegistryProvider.fromTransport(
         transport = McpToolRegistryProvider.defaultStdioTransport(process)
-    ) + ToolRegistry {
-        tool(ProvideStringSubgraphResult)
-    }
+    )
 
     toolRegistry.tools.forEach {
         println(it.name)
@@ -97,7 +95,7 @@ runBlocking {
 
     val strategy = strategy<String, String>("unity_interaction") {
         val nodePlanIngredients by nodeLLMRequest(allowToolCalls = false)
-        val interactionWithUnity by subgraphWithTask<String>(
+        val interactionWithUnity by subgraphWithTask<String, String>(
             // work with plan
             tools = toolRegistry.tools,
         ) { input ->
@@ -113,7 +111,7 @@ runBlocking {
             }
         )
         edge(nodePlanIngredients forwardTo interactionWithUnity onAssistantMessage { true })
-        edge(interactionWithUnity forwardTo nodeFinish transformed { it.result })
+        edge(interactionWithUnity forwardTo nodeFinish)
     }
 
     val agent = AIAgent(
@@ -125,17 +123,17 @@ runBlocking {
             install(Tracing)
 
             install(EventHandler) {
-                onBeforeAgentStarted { eventContext ->
-                    println("OnBeforeAgentStarted first (strategy: ${strategy.name})")
+                onAgentStarting { eventContext ->
+                    println("OnAgentStarting first (strategy: ${strategy.name})")
                 }
 
-                onBeforeAgentStarted { eventContext ->
-                    println("OnBeforeAgentStarted second (strategy: ${strategy.name})")
+                onAgentStarting { eventContext ->
+                    println("OnAgentStarting second (strategy: ${strategy.name})")
                 }
 
-                onAgentFinished { eventContext ->
+                onAgentCompleted { eventContext ->
                     println(
-                        "OnAgentFinished (agent id: ${eventContext.agentId}, result: ${eventContext.result})"
+                        "OnAgentCompleted (agent id: ${eventContext.agentId}, result: ${eventContext.result})"
                     )
                 }
             }

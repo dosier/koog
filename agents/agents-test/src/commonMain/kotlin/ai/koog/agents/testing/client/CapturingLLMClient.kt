@@ -4,12 +4,14 @@ import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.prompt.dsl.ModerationResult
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.executor.clients.LLMClient
-import ai.koog.prompt.executor.model.LLMChoice
+import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.streaming.StreamFrame
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlin.jvm.JvmOverloads
 
 /**
  * A test double implementation of [LLMClient] that captures the last inputs provided to each API
@@ -22,12 +24,14 @@ import kotlinx.coroutines.flow.flowOf
  * @property streamingChunks The sequence of chunks to emit from [executeStreaming].
  * @property choices The list of [LLMChoice] to return from [executeMultipleChoices].
  * @property moderationResult The [ModerationResult] to return from [moderate].
+ * @property llmProvider [LLMProvider] associated with the client or [LLMProvider.OpenAI], if not defined
  */
-public class CapturingLLMClient(
+public class CapturingLLMClient @JvmOverloads constructor(
     private val executeResponses: List<Message.Response> = emptyList(),
     private val streamingChunks: List<StreamFrame> = emptyList(),
     private val choices: List<LLMChoice> = emptyList(),
     private val moderationResult: ModerationResult = ModerationResult(isHarmful = false, categories = emptyMap()),
+    private val llmProvider: LLMProvider = LLMProvider.OpenAI
 ) : LLMClient {
 
     /** The last [Prompt] passed to [execute], or null if it hasn't been called yet. */
@@ -59,6 +63,8 @@ public class CapturingLLMClient(
 
     /** The last [LLModel] passed to [moderate], or null if it hasn't been called yet. */
     public var lastModerationModel: LLModel? = null
+
+    override fun llmProvider(): LLMProvider = llmProvider
 
     /**
      * Simulates a non-streaming LLM execution.
@@ -112,5 +118,9 @@ public class CapturingLLMClient(
         lastModerationPrompt = prompt
         lastModerationModel = model
         return moderationResult
+    }
+
+    override fun close() {
+        // No resources to close
     }
 }

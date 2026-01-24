@@ -40,7 +40,6 @@ This is the most general approach: react to each frame kind.
 <!--- INCLUDE
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.prompt.streaming.StreamFrame
-import ai.koog.prompt.structure.markdown.MarkdownStructuredDataDefinition
 
 val strategy = strategy<String, String>("strategy_name") {
     val node by node<Unit, Unit> {
@@ -51,7 +50,7 @@ val strategy = strategy<String, String>("strategy_name") {
 -->
 ```kotlin
 llm.writeSession {
-    updatePrompt { user("Tell me a joke, then call a tool with JSON args.") }
+    appendPrompt { user("Tell me a joke, then call a tool with JSON args.") }
 
     val stream = requestLLMStreaming() // Flow<StreamFrame>
 
@@ -77,7 +76,7 @@ Here is a raw string stream with the Markdown definition of the output structure
 
 <!--- INCLUDE
 import ai.koog.agents.core.dsl.builder.strategy
-import ai.koog.prompt.structure.markdown.MarkdownStructuredDataDefinition
+import ai.koog.prompt.structure.markdown.MarkdownStructureDefinition
 
 val strategy = strategy<String, String>("strategy_name") {
     val node by node<Unit, Unit> {
@@ -87,8 +86,8 @@ val strategy = strategy<String, String>("strategy_name") {
 }
 -->
 ```kotlin
-fun markdownBookDefinition(): MarkdownStructuredDataDefinition {
-    return MarkdownStructuredDataDefinition("name", schema = { /*...*/ })
+fun markdownBookDefinition(): MarkdownStructureDefinition {
+    return MarkdownStructureDefinition("name", schema = { /*...*/ })
 }
 
 val mdDefinition = markdownBookDefinition()
@@ -137,13 +136,14 @@ llm.writeSession {
 
 ### Listening to stream events in event handlers
 
-You can listen to stream events in [agent events](agent-events.md).
+You can listen to stream events in [agent event handlers](agent-event-handlers.md).
 
 <!--- INCLUDE
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.agent.GraphAIAgent
 import ai.koog.agents.features.eventHandler.feature.handleEvents
 import ai.koog.prompt.streaming.StreamFrame
+import ai.koog.prompt.structure.markdown.MarkdownStructureDefinition
 
 fun GraphAIAgent.FeatureContext.installStreamingApi() {
 -->
@@ -152,18 +152,18 @@ fun GraphAIAgent.FeatureContext.installStreamingApi() {
 -->
 ```kotlin
 handleEvents {
-    onToolCall { context ->
-        println("\n🔧 Using ${context.tool.name} with ${context.toolArgs}... ")
+    onToolCallStarting { context ->
+        println("\n🔧 Using ${context.toolName} with ${context.toolArgs}... ")
     }
-    onStreamFrame { context ->
+    onLLMStreamingFrameReceived { context ->
         (context.streamFrame as? StreamFrame.Append)?.let { frame ->
             print(frame.text)
         }
     }
-    onStreamError { context -> 
+    onLLMStreamingFailed { context -> 
         println("❌ Error: ${context.error}")
     }
-    onAfterStream {
+    onLLMStreamingCompleted {
         println("🏁 Done")
     }
 }
@@ -188,7 +188,7 @@ it is often more convenient to work with [structured data](structured-output.md)
 
 The structured data approach includes the following key components:
 
-1. **MarkdownStructuredDataDefinition**: a class to help you define the schema and examples for structured data in
+1. **MarkdownStructureDefinition**: a class to help you define the schema and examples for structured data in
    Markdown format.
 2. **markdownStreamingParser**: a function to create a parser that processes a stream of Markdown chunks and emits
    events.
@@ -200,7 +200,6 @@ The sections below provide step-by-step instructions and code samples related to
 First, define a data class to represent your structured data:
 
 <!--- INCLUDE
-import ai.koog.agents.core.tools.ToolArgs
 import kotlinx.serialization.Serializable
 -->
 ```kotlin
@@ -209,22 +208,22 @@ data class Book(
     val title: String,
     val author: String,
     val description: String
-): ToolArgs
+)
 ```
 <!--- KNIT example-streaming-api-03.kt -->
 
 #### 2. Define the Markdown structure
 
 Create a definition that specifies how your data should be structured in Markdown with the
-`MarkdownStructuredDataDefinition` class:
+`MarkdownStructureDefinition` class:
 
 <!--- INCLUDE
 import ai.koog.prompt.markdown.markdown
-import ai.koog.prompt.structure.markdown.MarkdownStructuredDataDefinition
+import ai.koog.prompt.structure.markdown.MarkdownStructureDefinition
 -->
 ```kotlin
-fun markdownBookDefinition(): MarkdownStructuredDataDefinition {
-    return MarkdownStructuredDataDefinition("bookList", schema = {
+fun markdownBookDefinition(): MarkdownStructureDefinition {
+    return MarkdownStructureDefinition("bookList", schema = {
         markdown {
             header(1, "title")
             bulleted {
@@ -347,7 +346,7 @@ val agentStrategy = strategy<String, List<Book>>("library-assistant") {
       val mdDefinition = markdownBookDefinition()
 
       llm.writeSession {
-         updatePrompt { user(booksDescription) }
+         appendPrompt { user(booksDescription) }
          // Initiate the response stream in the form of the definition `mdDefinition`
          val markdownStream = requestLLMStreaming(mdDefinition)
          // Call the parser with the result of the response stream and perform actions with the result
@@ -378,28 +377,29 @@ import ai.koog.agents.core.tools.SimpleTool
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.agents.example.exampleStreamingApi03.Book
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.Serializable
 
 -->
 ```kotlin
-class BookTool(): SimpleTool<Book>() {
-    
+@Serializable
+data class Book(
+   val title: String,
+   val author: String,
+   val description: String
+)
+
+class BookTool(): SimpleTool<Book>(
+    argsSerializer = Book.serializer(),
+    name = NAME,
+    description = "A tool to parse book information from Markdown"
+) {
+
     companion object { const val NAME = "book" }
 
-    override suspend fun doExecute(args: Book): String {
+    override suspend fun execute(args: Book): String {
         println("${args.title} by ${args.author}:\n ${args.description}")
         return "Done"
     }
-
-    override val argsSerializer: KSerializer<Book>
-        get() = Book.serializer()
-    
-    override val descriptor: ToolDescriptor
-        get() = ToolDescriptor(
-            name = NAME,
-            description = "A tool to parse book information from Markdown",
-            requiredParameters = listOf(),
-            optionalParameters = listOf()
-        )
 }
 ```
 <!--- KNIT example-streaming-api-08.kt -->
@@ -409,10 +409,10 @@ class BookTool(): SimpleTool<Book>() {
 <!--- INCLUDE
 import ai.koog.agents.core.dsl.builder.forwardTo
 import ai.koog.agents.core.dsl.builder.strategy
-import ai.koog.agents.core.tools.ToolArgs
 import ai.koog.agents.example.exampleStreamingApi04.markdownBookDefinition
 import ai.koog.agents.example.exampleStreamingApi06.parseMarkdownStreamToBooks
 import ai.koog.agents.example.exampleStreamingApi08.BookTool
+import ai.koog.agents.core.agent.session.callToolRaw
 
 -->
 ```kotlin
@@ -421,11 +421,11 @@ val agentStrategy = strategy<String, Unit>("library-assistant") {
       val mdDefinition = markdownBookDefinition()
 
       llm.writeSession {
-         updatePrompt { user(input) }
+         appendPrompt { user(input) }
          val markdownStream = requestLLMStreaming(mdDefinition)
 
          parseMarkdownStreamToBooks(markdownStream).collect { book ->
-            callToolRaw(BookTool.NAME, book as ToolArgs)
+            callToolRaw(BookTool.NAME, book)
             /* Other possible options:
                 callTool(BookTool::class, book)
                 callTool<BookTool>(book)
@@ -476,7 +476,7 @@ val runner = AIAgent(
 
 1. **Define clear structures**: create clear and unambiguous markdown structures for your data.
 
-2. **Provide good examples**: include comprehensive examples in your `MarkdownStructuredDataDefinition` to guide the LLM.
+2. **Provide good examples**: include comprehensive examples in your `MarkdownStructureDefinition` to guide the LLM.
 
 3. **Handle incomplete data**: always check for null or empty values when parsing data from the stream.
 

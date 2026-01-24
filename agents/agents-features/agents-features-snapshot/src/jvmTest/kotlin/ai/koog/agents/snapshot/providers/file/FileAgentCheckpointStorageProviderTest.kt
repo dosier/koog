@@ -17,12 +17,12 @@ import kotlin.test.assertTrue
 
 class FileAgentCheckpointStorageProviderTest {
     private lateinit var tempDir: java.nio.file.Path
-    private lateinit var provider: JVMFilePersistencyStorageProvider
+    private lateinit var provider: JVMFilePersistenceStorageProvider
 
     @BeforeTest
     fun setup() {
         tempDir = Files.createTempDirectory("checkpoint-test")
-        provider = JVMFilePersistencyStorageProvider(tempDir, "testAgentId")
+        provider = JVMFilePersistenceStorageProvider(tempDir)
     }
 
     @AfterTest
@@ -49,24 +49,26 @@ class FileAgentCheckpointStorageProviderTest {
         val checkpoint = AgentCheckpointData(
             checkpointId = checkpointId,
             createdAt = createdAt,
-            nodeId = nodeId,
-            lastInput = lastInput,
-            messageHistory = messageHistory
+            nodePath = nodeId,
+            lastOutput = lastInput,
+            messageHistory = messageHistory,
+            version = 0L
         )
 
+        val agentId = "testAgentId"
         // Save the checkpoint
-        provider.saveCheckpoint(checkpoint)
+        provider.saveCheckpoint(agentId, checkpoint)
 
         // Retrieve all checkpoints for the agent
-        val checkpoints = provider.getCheckpoints()
+        val checkpoints = provider.getCheckpoints(agentId)
         assertEquals(1, checkpoints.size, "Should have one checkpoint")
 
         // Verify the retrieved checkpoint
         val retrievedCheckpoint = checkpoints.first()
         assertEquals(checkpointId, retrievedCheckpoint.checkpointId)
         assertEquals(createdAt, retrievedCheckpoint.createdAt)
-        assertEquals(nodeId, retrievedCheckpoint.nodeId)
-        assertEquals(lastInput, retrievedCheckpoint.lastInput)
+        assertEquals(nodeId, retrievedCheckpoint.nodePath)
+        assertEquals(lastInput, retrievedCheckpoint.lastOutput)
         assertEquals(messageHistory.size, retrievedCheckpoint.messageHistory.size)
 
         // Check first message (User)
@@ -80,7 +82,7 @@ class FileAgentCheckpointStorageProviderTest {
         assertEquals(originalAssistantMsg.content, retrievedAssistantMsg.content)
 
         // Test getLatestCheckpoint
-        val latestCheckpoint = provider.getLatestCheckpoint()
+        val latestCheckpoint = provider.getLatestCheckpoint(agentId)
         assertNotNull(latestCheckpoint, "Latest checkpoint should not be null")
         assertEquals(checkpointId, latestCheckpoint.checkpointId)
 
@@ -90,21 +92,22 @@ class FileAgentCheckpointStorageProviderTest {
         val laterCheckpoint = AgentCheckpointData(
             checkpointId = laterCheckpointId,
             createdAt = laterCreatedAt,
-            nodeId = nodeId,
-            lastInput = lastInput,
-            messageHistory = messageHistory
+            nodePath = nodeId,
+            lastOutput = lastInput,
+            messageHistory = messageHistory,
+            version = checkpoint.version.plus(1)
         )
 
         // Save the later checkpoint
-        provider.saveCheckpoint(laterCheckpoint)
+        provider.saveCheckpoint(agentId, laterCheckpoint)
 
         // Verify that getLatestCheckpoint returns the later checkpoint
-        val newLatestCheckpoint = provider.getLatestCheckpoint()
+        val newLatestCheckpoint = provider.getLatestCheckpoint(agentId)
         assertNotNull(newLatestCheckpoint, "New latest checkpoint should not be null")
         assertEquals(laterCheckpointId, newLatestCheckpoint.checkpointId)
 
         // Verify that getCheckpoints returns both checkpoints
-        val allCheckpoints = provider.getCheckpoints()
+        val allCheckpoints = provider.getCheckpoints(agentId)
         assertEquals(2, allCheckpoints.size, "Should have two checkpoints")
         assertTrue(allCheckpoints.any { it.checkpointId == checkpointId })
         assertTrue(allCheckpoints.any { it.checkpointId == laterCheckpointId })

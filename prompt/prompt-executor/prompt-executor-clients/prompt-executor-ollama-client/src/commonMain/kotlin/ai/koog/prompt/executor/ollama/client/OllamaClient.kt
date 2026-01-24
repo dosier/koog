@@ -1,29 +1,33 @@
 package ai.koog.prompt.executor.ollama.client
 
 import ai.koog.agents.core.tools.ToolDescriptor
+import ai.koog.agents.core.tools.serialization.ToolDescriptorSchemaGenerator
+import ai.koog.http.client.KoogHttpClientException
 import ai.koog.prompt.dsl.ModerationCategory
 import ai.koog.prompt.dsl.ModerationCategoryResult
 import ai.koog.prompt.dsl.ModerationResult
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.executor.clients.ConnectionTimeoutConfig
 import ai.koog.prompt.executor.clients.LLMClient
+import ai.koog.prompt.executor.clients.LLMClientException
 import ai.koog.prompt.executor.clients.LLMEmbeddingProvider
 import ai.koog.prompt.executor.ollama.client.dto.EmbeddingRequestDTO
 import ai.koog.prompt.executor.ollama.client.dto.EmbeddingResponseDTO
 import ai.koog.prompt.executor.ollama.client.dto.OllamaChatRequestDTO
+import ai.koog.prompt.executor.ollama.client.dto.OllamaChatRequestDTOSerializer
 import ai.koog.prompt.executor.ollama.client.dto.OllamaChatResponseDTO
-import ai.koog.prompt.executor.ollama.client.dto.OllamaErrorResponseDTO
 import ai.koog.prompt.executor.ollama.client.dto.OllamaModelsListResponseDTO
 import ai.koog.prompt.executor.ollama.client.dto.OllamaPullModelRequestDTO
 import ai.koog.prompt.executor.ollama.client.dto.OllamaPullModelResponseDTO
 import ai.koog.prompt.executor.ollama.client.dto.OllamaShowModelRequestDTO
 import ai.koog.prompt.executor.ollama.client.dto.OllamaShowModelResponseDTO
+import ai.koog.prompt.executor.ollama.client.dto.OllamaToolDTO
+import ai.koog.prompt.executor.ollama.client.dto.OllamaToolDTO.Definition
 import ai.koog.prompt.executor.ollama.client.dto.extractOllamaJsonFormat
-import ai.koog.prompt.executor.ollama.client.dto.extractOllamaOptions
 import ai.koog.prompt.executor.ollama.client.dto.getToolCalls
 import ai.koog.prompt.executor.ollama.client.dto.toOllamaChatMessages
 import ai.koog.prompt.executor.ollama.client.dto.toOllamaModelCard
-import ai.koog.prompt.executor.ollama.client.dto.toOllamaTool
+import ai.koog.prompt.executor.ollama.tools.json.OllamaToolDescriptorSchemaGenerator
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
@@ -36,7 +40,6 @@ import ai.koog.prompt.streaming.streamFrameFlow
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
-import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
@@ -44,31 +47,39 @@ import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.readUTF8Line
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlin.time.Clock
 import kotlinx.serialization.json.Json
+import kotlin.jvm.JvmOverloads
 
 /**
  * Client for interacting with the Ollama API with comprehensive model support.
+ *
+ * Implements:
+ * - [LLMClient] for executing prompts and streaming responses.
+ * - [LLMEmbeddingProvider] for generating embeddings from input text.
  *
  * @param baseUrl The base URL of the Ollama server. Defaults to "http://localhost:11434".
  * @param baseClient The underlying HTTP client used for making requests.
  * @param timeoutConfig Configuration for connection, request, and socket timeouts.
  * @param clock Clock instance used for tracking response metadata timestamps.
- * Implements:
- * - LLMClient for executing prompts and streaming responses.
- * - LLMEmbeddingProvider for generating embeddings from input text.
+ * @param contextWindowStrategy The [ContextWindowStrategy] to use for computing context window lengths.
+ *   Defaults to [ContextWindowStrategy.None].
  */
-public class OllamaClient(
+public class OllamaClient @JvmOverloads constructor(
     public val baseUrl: String = "http://localhost:11434",
-    baseClient: HttpClient = HttpClient(engineFactoryProvider()),
+    baseClient: HttpClient = HttpClient(),
     timeoutConfig: ConnectionTimeoutConfig = ConnectionTimeoutConfig(),
-    private val clock: Clock = Clock.System
+    private val clock: Clock = Clock.System,
+    private val contextWindowStrategy: ContextWindowStrategy = ContextWindowStrategy.Companion.None,
+    private val toolDescriptorConverter: ToolDescriptorSchemaGenerator = OllamaToolDescriptorSchemaGenerator()
 ) : LLMClient, LLMEmbeddingProvider {
 
     private companion object {
@@ -144,6 +155,13 @@ public class OllamaClient(
         }
     }
 
+    /**
+     * Provides the type of Language Learning Model (LLM) provider used by the client.
+     *
+     * @return The specific LLMProvider implementation, which is of type LLMProvider.Ollama.
+     */
+    override fun llmProvider(): LLMProvider = LLMProvider.Ollama
+
     override suspend fun execute(
         prompt: Prompt,
         model: LLModel,
@@ -151,25 +169,54 @@ public class OllamaClient(
     ): List<Message.Response> {
         require(model.provider == LLMProvider.Ollama) { "Model not supported by Ollama" }
 
-        val response = client.post(DEFAULT_MESSAGE_PATH) {
-            setBody(
-                OllamaChatRequestDTO(
-                    model = model.id,
-                    messages = prompt.toOllamaChatMessages(model),
-                    tools = if (tools.isNotEmpty()) tools.map { it.toOllamaTool() } else null,
-                    format = prompt.extractOllamaJsonFormat(),
-                    options = prompt.extractOllamaOptions(),
-                    stream = false,
+        val ollamaTools = if (tools.isNotEmpty()) {
+            tools.map {
+                OllamaToolDTO(
+                    type = "function",
+                    function = Definition(
+                        name = it.name,
+                        description = it.description,
+                        parameters = toolDescriptorConverter.generate(it)
+                    )
                 )
+            }
+        } else {
+            null
+        }
+
+        val request = ollamaJson.encodeToString(
+            OllamaChatRequestDTOSerializer,
+            OllamaChatRequestDTO(
+                model = model.id,
+                messages = prompt.toOllamaChatMessages(model),
+                tools = ollamaTools,
+                format = prompt.extractOllamaJsonFormat(),
+                options = extractOllamaOptions(prompt, model),
+                stream = false,
+                additionalProperties = prompt.params.additionalProperties
             )
+        )
+
+        val response = client.post(DEFAULT_MESSAGE_PATH) {
+            setBody(request)
         }
 
         if (response.status.isSuccess()) {
             return parseResponse(response.body<OllamaChatResponseDTO>())
         } else {
-            val errorResponse = response.body<OllamaErrorResponseDTO>()
-            logger.error { "Ollama error: ${errorResponse.error}" }
-            throw RuntimeException("Ollama API error: ${errorResponse.error}")
+            // TODO: after the update to the KoogHttpClient, delegate this logic to the http client
+
+            val httpClientException = KoogHttpClientException(
+                statusCode = response.status.value,
+                errorBody = response.bodyAsText(),
+            )
+            val exception = LLMClientException(
+                clientName = clientName,
+                message = httpClientException.message,
+                cause = httpClientException,
+            )
+            logger.error(exception) { exception.message }
+            throw exception
         }
     }
 
@@ -229,15 +276,19 @@ public class OllamaClient(
     ): Flow<StreamFrame> = streamFrameFlow {
         require(model.provider == LLMProvider.Ollama) { "Model not supported by Ollama" }
 
-        val response = client.post(DEFAULT_MESSAGE_PATH) {
-            setBody(
-                OllamaChatRequestDTO(
-                    model = model.id,
-                    messages = prompt.toOllamaChatMessages(model),
-                    options = prompt.extractOllamaOptions(),
-                    stream = true,
-                )
+        val request = ollamaJson.encodeToString(
+            OllamaChatRequestDTOSerializer,
+            OllamaChatRequestDTO(
+                model = model.id,
+                messages = prompt.toOllamaChatMessages(model),
+                options = extractOllamaOptions(prompt, model),
+                stream = true,
+                additionalProperties = prompt.params.additionalProperties,
             )
+        )
+
+        val response = client.post(DEFAULT_MESSAGE_PATH) {
+            setBody(request)
         }
 
         val channel = response.bodyAsChannel()
@@ -266,18 +317,28 @@ public class OllamaClient(
     }
 
     /**
+     * Prepare Ollama chat request options from the given prompt and model.
+     */
+    internal fun extractOllamaOptions(prompt: Prompt, model: LLModel): OllamaChatRequestDTO.Options {
+        return OllamaChatRequestDTO.Options(
+            temperature = prompt.params.temperature,
+            numCtx = contextWindowStrategy.computeContextLength(prompt, model),
+        )
+    }
+
+    /**
      * Embeds the given text using the Ollama model.
      *
      * @param text The text to embed.
      * @param model The model to use for embedding. Must have the Embed capability.
      * @return A vector representation of the text.
-     * @throws IllegalArgumentException if the model does not have the Embed capability.
+     * @throws LLMClientException if the model does not have the Embed capability.
      */
     override suspend fun embed(text: String, model: LLModel): List<Double> {
         require(model.provider == LLMProvider.Ollama) { "Model not supported by Ollama" }
 
         if (!model.capabilities.contains(LLMCapability.Embed)) {
-            throw IllegalArgumentException("Model ${model.id} does not have the Embed capability")
+            throw LLMClientException(clientName, "Model ${model.id} does not have the Embed capability")
         }
 
         val response = client.post(DEFAULT_EMBEDDINGS_PATH) {
@@ -302,8 +363,13 @@ public class OllamaClient(
             logger.info { "Loaded ${modelCards.size} Ollama model cards" }
             modelCards
         } catch (e: Exception) {
-            logger.error(e) { "Failed to fetch model cards from Ollama" }
-            throw e
+            val exception = LLMClientException(
+                clientName = clientName,
+                message = "Failed to fetch model cards from Ollama: ${e.message}",
+                cause = e
+            )
+            logger.error(exception) { exception.message }
+            throw exception
         }
     }
 
@@ -325,7 +391,7 @@ public class OllamaClient(
 
     public override suspend fun moderate(prompt: Prompt, model: LLModel): ModerationResult {
         if (!model.capabilities.contains(LLMCapability.Moderation)) {
-            throw IllegalArgumentException("Model ${model.id} does not support moderation")
+            throw LLMClientException(clientName, "Model ${model.id} does not support moderation")
         }
 
         require(prompt.messages.isNotEmpty()) {
@@ -354,7 +420,7 @@ public class OllamaClient(
         return when (result) {
             "safe" -> false
             "unsafe" -> true
-            else -> throw IllegalStateException("Unknown moderation result: $result")
+            else -> throw LLMClientException(clientName, "Unknown moderation result: $result")
         }
     }
 
@@ -386,9 +452,16 @@ public class OllamaClient(
 
             logger.info { "Loaded Ollama model card for $name" }
             modelCard
-        } catch (e: Exception) {
-            logger.error(e) { "Failed to fetch model card from Ollama" }
+        } catch (e: CancellationException) {
             throw e
+        } catch (e: Exception) {
+            val exception = LLMClientException(
+                clientName = clientName,
+                message = "Failed to fetch model card from Ollama: ${e.message}",
+                cause = e
+            )
+            logger.error(exception) { exception.message }
+            throw exception
         }
     }
 
@@ -408,14 +481,23 @@ public class OllamaClient(
                 setBody(OllamaPullModelRequestDTO(name = name, stream = false))
             }.body<OllamaPullModelResponseDTO>()
 
-            if ("success" !in response.status) error("Failed to pull model: '$name'")
+            if ("success" !in response.status) throw LLMClientException(clientName, "Failed to pull model: '$name'")
 
             logger.info { "Pulled model '$name'" }
-        } catch (e: Exception) {
-            logger.error(e) { "Failed to pull model '$name'" }
+        } catch (e: CancellationException) {
             throw e
+        } catch (e: Exception) {
+            val exception = LLMClientException(
+                clientName = clientName,
+                message = "Failed to pull model: ${e.message}",
+                cause = e
+            )
+            logger.error(exception) { exception.message }
+            throw exception
         }
     }
-}
 
-internal expect fun engineFactoryProvider(): HttpClientEngineFactory<*>
+    override fun close() {
+        client.close()
+    }
+}

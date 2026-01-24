@@ -1,17 +1,15 @@
 package ai.koog.agents.core.dsl.extension
 
 import ai.koog.agents.core.agent.context.DetachedPromptExecutorAPI
+import ai.koog.agents.core.agent.session.callTool
 import ai.koog.agents.core.dsl.builder.AIAgentBuilderDslMarker
 import ai.koog.agents.core.dsl.builder.AIAgentNodeDelegate
 import ai.koog.agents.core.dsl.builder.AIAgentSubgraphBuilderBase
 import ai.koog.agents.core.environment.ReceivedToolResult
 import ai.koog.agents.core.environment.SafeTool
-import ai.koog.agents.core.environment.executeTool
 import ai.koog.agents.core.environment.result
 import ai.koog.agents.core.tools.Tool
-import ai.koog.agents.core.tools.ToolArgs
 import ai.koog.agents.core.tools.ToolDescriptor
-import ai.koog.agents.core.tools.ToolResult
 import ai.koog.prompt.dsl.ModerationResult
 import ai.koog.prompt.dsl.PromptBuilder
 import ai.koog.prompt.dsl.prompt
@@ -19,12 +17,13 @@ import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.streaming.StreamFrame
 import ai.koog.prompt.streaming.toMessageResponses
+import ai.koog.prompt.structure.StructureDefinition
 import ai.koog.prompt.structure.StructureFixingParser
-import ai.koog.prompt.structure.StructuredDataDefinition
-import ai.koog.prompt.structure.StructuredOutputConfig
+import ai.koog.prompt.structure.StructuredRequestConfig
 import ai.koog.prompt.structure.StructuredResponse
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.toList
+import kotlinx.serialization.Serializable
 
 /**
  * A pass-through node that does nothing and returns input as output
@@ -49,13 +48,13 @@ public inline fun <reified T> AIAgentSubgraphBuilderBase<*, *>.nodeDoNothing(
  * @param body Lambda to modify the prompt using PromptBuilder.
  */
 @AIAgentBuilderDslMarker
-public inline fun <reified T> AIAgentSubgraphBuilderBase<*, *>.nodeUpdatePrompt(
+public inline fun <reified T> AIAgentSubgraphBuilderBase<*, *>.nodeAppendPrompt(
     name: String? = null,
     noinline body: PromptBuilder.() -> Unit
 ): AIAgentNodeDelegate<T, T> =
     node(name) { input ->
         llm.writeSession {
-            updatePrompt {
+            appendPrompt {
                 body()
             }
         }
@@ -64,21 +63,69 @@ public inline fun <reified T> AIAgentSubgraphBuilderBase<*, *>.nodeUpdatePrompt(
     }
 
 /**
+ * A node that adds messages to the LLM prompt using the provided prompt builder.
+ * The input is passed as it is to the output.
+ *
+ * @param name Optional node name, defaults to delegate's property name.
+ * @param body Lambda to modify the prompt using PromptBuilder.
+ */
+@AIAgentBuilderDslMarker
+@Deprecated("Use nodeAppendPrompt instead", ReplaceWith("nodeAppendPrompt(name, body)"))
+public inline fun <reified T> AIAgentSubgraphBuilderBase<*, *>.nodeUpdatePrompt(
+    name: String? = null,
+    noinline body: PromptBuilder.() -> Unit
+): AIAgentNodeDelegate<T, T> = nodeAppendPrompt(name, body)
+
+/**
  * A node that appends a user message to the LLM prompt and gets a response where the LLM can only call tools.
  *
  * @param name Optional name for the node.
  */
 @AIAgentBuilderDslMarker
-public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendMessageOnlyCallingTools(
+public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestOnlyCallingTools(
     name: String? = null
 ): AIAgentNodeDelegate<String, Message.Response> =
     node(name) { message ->
         llm.writeSession {
-            updatePrompt {
+            appendPrompt {
                 user(message)
             }
 
             requestLLMOnlyCallingTools()
+        }
+    }
+
+/**
+ * A node that appends a user message to the LLM prompt and gets a response where the LLM can only call tools.
+ *
+ * @param name Optional name for the node.
+ */
+@Deprecated(
+    "Please use nodeLLMRequestOnlyCallingTools instead.",
+    ReplaceWith("nodeLLMRequestOnlyCallingTools(name)")
+)
+@AIAgentBuilderDslMarker
+public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendMessageOnlyCallingTools(
+    name: String? = null
+): AIAgentNodeDelegate<String, Message.Response> =
+    nodeLLMRequestOnlyCallingTools(name)
+
+/**
+ * A node that appends a user message to the LLM prompt and gets multiple LLM responses where the LLM can only call tools.
+ *
+ * @param name Optional name for the node.
+ */
+@AIAgentBuilderDslMarker
+public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestMultipleOnlyCallingTools(
+    name: String? = null
+): AIAgentNodeDelegate<String, List<Message.Response>> =
+    node(name) { message ->
+        llm.writeSession {
+            appendPrompt {
+                user(message)
+            }
+
+            requestLLMMultipleOnlyCallingTools()
         }
     }
 
@@ -89,13 +136,13 @@ public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendMessageOnlyCallingTools(
  * @param tool Tool descriptor the LLM is required to use.
  */
 @AIAgentBuilderDslMarker
-public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendMessageForceOneTool(
+public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestForceOneTool(
     name: String? = null,
     tool: ToolDescriptor
 ): AIAgentNodeDelegate<String, Message.Response> =
     node(name) { message ->
         llm.writeSession {
-            updatePrompt {
+            appendPrompt {
                 user(message)
             }
 
@@ -104,17 +151,51 @@ public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendMessageForceOneTool(
     }
 
 /**
+ * A node that that appends a user message to the LLM prompt and forces the LLM to use a specific tool.
+ *
+ * @param name Optional node name.
+ * @param tool Tool descriptor the LLM is required to use.
+ */
+@Deprecated(
+    "Please use nodeLLMRequestForceOneTool instead.",
+    ReplaceWith("nodeLLMRequestForceOneTool(name, tool)")
+)
+@AIAgentBuilderDslMarker
+public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendMessageForceOneTool(
+    name: String? = null,
+    tool: ToolDescriptor
+): AIAgentNodeDelegate<String, Message.Response> =
+    nodeLLMRequestForceOneTool(name, tool)
+
+/**
  * A node that appends a user message to the LLM prompt and forces the LLM to use a specific tool.
  *
  * @param name Optional node name.
  * @param tool Tool the LLM is required to use.
  */
 @AIAgentBuilderDslMarker
+public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestForceOneTool(
+    name: String? = null,
+    tool: Tool<*, *>
+): AIAgentNodeDelegate<String, Message.Response> =
+    nodeLLMRequestForceOneTool(name, tool.descriptor)
+
+/**
+ * A node that appends a user message to the LLM prompt and forces the LLM to use a specific tool.
+ *
+ * @param name Optional node name.
+ * @param tool Tool the LLM is required to use.
+ */
+@Deprecated(
+    "Please use nodeLLMRequestForceOneTool instead.",
+    ReplaceWith("nodeLLMRequestForceOneTool(name, tool)")
+)
+@AIAgentBuilderDslMarker
 public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendMessageForceOneTool(
     name: String? = null,
     tool: Tool<*, *>
 ): AIAgentNodeDelegate<String, Message.Response> =
-    nodeLLMSendMessageForceOneTool(name, tool.descriptor)
+    nodeLLMRequestForceOneTool(name, tool)
 
 /**
  * A node that appends a user message to the LLM prompt and gets a response with optional tool usage.
@@ -125,11 +206,11 @@ public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendMessageForceOneTool(
 @AIAgentBuilderDslMarker
 public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequest(
     name: String? = null,
-    allowToolCalls: Boolean = true
+    allowToolCalls: Boolean = true,
 ): AIAgentNodeDelegate<String, Message.Response> =
     node(name) { message ->
         llm.writeSession {
-            updatePrompt {
+            appendPrompt {
                 user(message)
             }
 
@@ -147,6 +228,7 @@ public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequest(
  * @property message The original message being moderated.
  * @property moderationResult The result of the moderation.
  * */
+@Serializable
 public data class ModeratedMessage(val message: Message, val moderationResult: ModerationResult)
 
 /**
@@ -186,11 +268,11 @@ public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMModerateMessage(
 @AIAgentBuilderDslMarker
 public inline fun <reified T> AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestStructured(
     name: String? = null,
-    config: StructuredOutputConfig<T>,
+    config: StructuredRequestConfig<T>,
 ): AIAgentNodeDelegate<String, Result<StructuredResponse<T>>> =
     node(name) { message ->
         llm.writeSession {
-            updatePrompt {
+            appendPrompt {
                 user(message)
             }
 
@@ -221,7 +303,7 @@ public inline fun <reified T> AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestStr
 ): AIAgentNodeDelegate<String, Result<StructuredResponse<T>>> =
     node(name) { message ->
         llm.writeSession {
-            updatePrompt {
+            appendPrompt {
                 user(message)
             }
 
@@ -242,12 +324,12 @@ public inline fun <reified T> AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestStr
 @AIAgentBuilderDslMarker
 public fun <T> AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestStreaming(
     name: String? = null,
-    structureDefinition: StructuredDataDefinition? = null,
+    structureDefinition: StructureDefinition? = null,
     transformStreamData: suspend (Flow<StreamFrame>) -> Flow<T>
 ): AIAgentNodeDelegate<String, Flow<T>> =
     node(name) { message ->
         llm.writeSession {
-            updatePrompt {
+            appendPrompt {
                 user(message)
             }
 
@@ -266,7 +348,7 @@ public fun <T> AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestStreaming(
 @AIAgentBuilderDslMarker
 public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestStreaming(
     name: String? = null,
-    structureDefinition: StructuredDataDefinition? = null,
+    structureDefinition: StructureDefinition? = null,
 ): AIAgentNodeDelegate<String, Flow<StreamFrame>> = nodeLLMRequestStreaming(name, structureDefinition) { it }
 
 /**
@@ -280,7 +362,7 @@ public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestMultiple(
 ): AIAgentNodeDelegate<String, List<Message.Response>> =
     node(name) { message ->
         llm.writeSession {
-            updatePrompt {
+            appendPrompt {
                 user(message)
             }
 
@@ -345,13 +427,13 @@ public inline fun <reified T> AIAgentSubgraphBuilderBase<*, *>.nodeLLMCompressHi
 @AIAgentBuilderDslMarker
 public inline fun <reified T> AIAgentSubgraphBuilderBase<*, *>.nodeLLMRequestStreamingAndSendResults(
     name: String? = null,
-    structureDefinition: StructuredDataDefinition? = null
+    structureDefinition: StructureDefinition? = null
 ): AIAgentNodeDelegate<T, List<Message.Response>> = node(name) { input ->
     llm.writeSession {
         requestLLMStreaming(structureDefinition)
             .toList()
             .toMessageResponses()
-            .also { updatePrompt { messages(it) } }
+            .also { appendPrompt { messages(it) } }
     }
 }
 
@@ -383,13 +465,34 @@ public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendToolResult(
 ): AIAgentNodeDelegate<ReceivedToolResult, Message.Response> =
     node(name) { result ->
         llm.writeSession {
-            updatePrompt {
+            appendPrompt {
                 tool {
                     result(result)
                 }
             }
 
             requestLLM()
+        }
+    }
+
+/**
+ * A node that adds a tool result to the prompt and gets an LLM response where the LLM can only call tools.
+ *
+ * @param name Optional node name.
+ */
+@AIAgentBuilderDslMarker
+public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendToolResultOnlyCallingTools(
+    name: String? = null
+): AIAgentNodeDelegate<List<ReceivedToolResult>, Message.Response> =
+    node(name) { results ->
+        llm.writeSession {
+            appendPrompt {
+                tool {
+                    results.forEach { result(it) }
+                }
+            }
+
+            requestLLMOnlyCallingTools()
         }
     }
 
@@ -436,7 +539,7 @@ public fun AIAgentSubgraphBuilderBase<*, *>.nodeExecuteMultipleToolsAndSendResul
         }
 
         llm.writeSession {
-            updatePrompt {
+            appendPrompt {
                 tool {
                     results.forEach { result(it) }
                 }
@@ -457,7 +560,7 @@ public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendMultipleToolResults(
 ): AIAgentNodeDelegate<List<ReceivedToolResult>, List<Message.Response>> =
     node(name) { results ->
         llm.writeSession {
-            updatePrompt {
+            appendPrompt {
                 tool {
                     results.forEach { result(it) }
                 }
@@ -468,22 +571,43 @@ public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendMultipleToolResults(
     }
 
 /**
+ * A node that adds multiple tool results to the prompt and gets multiple LLM responses where the LLM can only call tools.
+ *
+ * @param name Optional node name.
+ */
+@AIAgentBuilderDslMarker
+public fun AIAgentSubgraphBuilderBase<*, *>.nodeLLMSendMultipleToolResultsOnlyCallingTools(
+    name: String? = null
+): AIAgentNodeDelegate<List<ReceivedToolResult>, List<Message.Response>> =
+    node(name) { results ->
+        llm.writeSession {
+            appendPrompt {
+                tool {
+                    results.forEach { result(it) }
+                }
+            }
+
+            requestLLMMultipleOnlyCallingTools()
+        }
+    }
+
+/**
  * A node that calls a specific tool directly using the provided arguments.
  *
  * @param name Optional node name.
  * @param tool The tool to execute.
- * @param doUpdatePrompt Specifies whether to add tool call details to the prompt.
+ * @param doAppendPrompt Specifies whether to add tool call details to the prompt.
  */
 @AIAgentBuilderDslMarker
-public inline fun <reified ToolArg : ToolArgs, reified TResult : ToolResult> AIAgentSubgraphBuilderBase<*, *>.nodeExecuteSingleTool(
+public inline fun <reified ToolArg, reified TResult> AIAgentSubgraphBuilderBase<*, *>.nodeExecuteSingleTool(
     name: String? = null,
     tool: Tool<ToolArg, TResult>,
-    doUpdatePrompt: Boolean = true
+    doAppendPrompt: Boolean = true
 ): AIAgentNodeDelegate<ToolArg, SafeTool.Result<TResult>> =
     node(name) { toolArgs ->
         llm.writeSession {
-            if (doUpdatePrompt) {
-                updatePrompt {
+            if (doAppendPrompt) {
+                appendPrompt {
                     // Why not tool message? Because it requires id != null to send it back to the LLM,
                     // The only workaround is to generate it
                     user(
@@ -496,8 +620,8 @@ public inline fun <reified ToolArg : ToolArgs, reified TResult : ToolResult> AIA
 
             val toolResult = callTool<ToolArg, TResult>(tool, toolArgs)
 
-            if (doUpdatePrompt) {
-                updatePrompt {
+            if (doAppendPrompt) {
+                appendPrompt {
                     user(
                         "Tool call: ${tool.name} was explicitly called and returned result: ${
                             toolResult.content
@@ -507,5 +631,28 @@ public inline fun <reified ToolArg : ToolArgs, reified TResult : ToolResult> AIA
             }
 
             toolResult
+        }
+    }
+
+/**
+ * Creates a node that sets up a structured output for an AI agent subgraph.
+ *
+ * The method defines a new node with a configurable structured output schema
+ * that will be applied during the AI agent's message processing. The schema
+ * is determined by the given configuration.
+ *
+ * @param name An optional name for the node. If null, a default name will be assigned.
+ * @param config The configuration that defines the structured output format and schema.
+ * @return An instance of [AIAgentNodeDelegate] representing the constructed node.
+ */
+@AIAgentBuilderDslMarker
+public inline fun <reified TInput, T> AIAgentSubgraphBuilderBase<*, *>.nodeSetStructuredOutput(
+    name: String? = null,
+    config: StructuredRequestConfig<T>
+): AIAgentNodeDelegate<TInput, TInput> =
+    node(name) { message ->
+        llm.writeSession {
+            prompt = config.updatePrompt(model, prompt)
+            message
         }
     }

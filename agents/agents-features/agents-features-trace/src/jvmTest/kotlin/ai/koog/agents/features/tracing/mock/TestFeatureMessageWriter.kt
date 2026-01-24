@@ -2,12 +2,13 @@ package ai.koog.agents.features.tracing.mock
 
 import ai.koog.agents.core.feature.message.FeatureMessage
 import ai.koog.agents.core.feature.message.FeatureMessageProcessor
-import ai.koog.agents.core.feature.model.events.AIAgentStartedEvent
+import ai.koog.agents.core.feature.model.events.AgentClosingEvent
+import ai.koog.agents.core.feature.model.events.AgentStartingEvent
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-class TestFeatureMessageWriter : FeatureMessageProcessor() {
+class TestFeatureMessageWriter(private val onClose: (suspend () -> Unit)? = null) : FeatureMessageProcessor() {
 
     var runId: String = ""
 
@@ -26,15 +27,16 @@ class TestFeatureMessageWriter : FeatureMessageProcessor() {
     override suspend fun processMessage(message: FeatureMessage) {
         logger.info { "Process feature message: $message" }
 
-        if (message is AIAgentStartedEvent) {
+        if (message is AgentStartingEvent) {
             runId = message.runId
         }
 
         _messages.add(message)
+
+        if (message is AgentClosingEvent) {
+            onClose?.invoke()
+        }
     }
 
-    override suspend fun close() {
-        logger.info { "Closing test event message writer" }
-        runId = ""
-    }
+    override suspend fun close() { }
 }

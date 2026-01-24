@@ -1,6 +1,5 @@
 package ai.koog.agents.core.tools.reflect
 
-import ai.koog.agents.core.tools.DirectToolCallsEnabler
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
 import ai.koog.agents.core.tools.annotations.LLMDescription
 import ai.koog.agents.core.tools.annotations.Tool
@@ -14,9 +13,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-
-@OptIn(InternalAgentToolsApi::class)
-object TestToolsEnabler : DirectToolCallsEnabler
 
 interface MathToolsInterface : ToolSet {
     @Tool
@@ -133,8 +129,8 @@ class ToolSetAsToolsTest {
             put("b", JsonPrimitive(3))
         }
 
-        val addResult = addTool.execute(addTool.decodeArgs(addArgs), TestToolsEnabler)
-        assertEquals("8", addResult.toStringDefault(), "Add tool should return 8")
+        val addResult = addTool.execute(addTool.decodeArgs(addArgs))
+        assertEquals("8", addTool.encodeResultToStringUnsafe(addResult), "Add tool should return 8")
 
         val multiplyTool = tools.find { it.descriptor.name == "multiply" }
         assertNotNull(multiplyTool, "Multiply tool should be found")
@@ -144,8 +140,8 @@ class ToolSetAsToolsTest {
             put("b", JsonPrimitive(7))
         }
 
-        val multiplyResult = multiplyTool.execute(multiplyTool.decodeArgs(multiplyArgs), TestToolsEnabler)
-        assertEquals("28", multiplyResult.toStringDefault(), "Multiply tool should return 28")
+        val multiplyResult = multiplyTool.execute(multiplyTool.decodeArgs(multiplyArgs))
+        assertEquals("28", multiplyTool.encodeResultToStringUnsafe(multiplyResult), "Multiply tool should return 28")
     }
 
     @Test
@@ -164,8 +160,8 @@ class ToolSetAsToolsTest {
             put("exponent", JsonPrimitive(3))
         }
 
-        val powerResult = powerTool.execute(powerTool.decodeArgs(powerArgs), TestToolsEnabler)
-        assertEquals("8", powerResult.toStringDefault(), "Power tool should return 8")
+        val powerResult = powerTool.execute(powerTool.decodeArgs(powerArgs))
+        assertEquals("8", powerTool.encodeResultToStringUnsafe(powerResult), "Power tool should return 8")
     }
 
     @Test
@@ -184,8 +180,8 @@ class ToolSetAsToolsTest {
             put("b", JsonPrimitive(4))
         }
 
-        val subtractResult = subtractTool.execute(subtractTool.decodeArgs(subtractArgs), TestToolsEnabler)
-        assertEquals("6", subtractResult.toStringDefault(), "Subtract tool should return 6")
+        val subtractResult = subtractTool.execute(subtractTool.decodeArgs(subtractArgs))
+        assertEquals("6", subtractTool.encodeResultToStringUnsafe(subtractResult), "Subtract tool should return 6")
     }
 
     @Test
@@ -204,8 +200,8 @@ class ToolSetAsToolsTest {
             put("b", JsonPrimitive("World!"))
         }
 
-        val concatResult = concatTool.execute(concatTool.decodeArgs(concatArgs), TestToolsEnabler)
-        assertEquals("\"Hello, World!\"", concatResult.toStringDefault(), "Concat tool should return \"Hello, World!\"")
+        val concatResult = concatTool.execute(concatTool.decodeArgs(concatArgs))
+        assertEquals("\"Hello, World!\"", concatTool.encodeResultToStringUnsafe(concatResult), "Concat tool should return \"Hello, World!\"")
     }
 
     @Test
@@ -223,8 +219,8 @@ class ToolSetAsToolsTest {
         }
 
         val createPersonResult =
-            createPersonTool.execute(createPersonTool.decodeArgs(createPersonArgs), TestToolsEnabler)
-        val personJson = createPersonResult.toStringDefault()
+            createPersonTool.execute(createPersonTool.decodeArgs(createPersonArgs))
+        val personJson = createPersonTool.encodeResultToStringUnsafe(createPersonResult)
         assertTrue(personJson.contains("\"name\":\"John\""), "Person JSON should contain name")
         assertTrue(personJson.contains("\"age\":30"), "Person JSON should contain age")
 
@@ -236,10 +232,10 @@ class ToolSetAsToolsTest {
         }
 
         val formatPersonResult =
-            formatPersonTool.execute(formatPersonTool.decodeArgs(formatPersonArgs), TestToolsEnabler)
+            formatPersonTool.execute(formatPersonTool.decodeArgs(formatPersonArgs))
         assertEquals(
             "\"John is 30 years old\"",
-            formatPersonResult.toStringDefault(),
+            formatPersonTool.encodeResultToStringUnsafe(formatPersonResult),
             "Format tool should return formatted string"
         )
     }

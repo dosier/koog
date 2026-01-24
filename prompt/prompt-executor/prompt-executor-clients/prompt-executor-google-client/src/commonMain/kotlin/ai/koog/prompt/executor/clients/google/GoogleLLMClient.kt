@@ -3,20 +3,38 @@ package ai.koog.prompt.executor.clients.google
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.agents.core.tools.ToolParameterDescriptor
 import ai.koog.agents.core.tools.ToolParameterType
-import ai.koog.agents.utils.SuitableForIO
+import ai.koog.http.client.KoogHttpClient
+import ai.koog.http.client.ktor.fromKtorClient
 import ai.koog.prompt.dsl.ModerationResult
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.executor.clients.ConnectionTimeoutConfig
 import ai.koog.prompt.executor.clients.LLMClient
+import ai.koog.prompt.executor.clients.LLMClientException
+import ai.koog.prompt.executor.clients.LLMEmbeddingProvider
+import ai.koog.prompt.executor.clients.google.models.GoogleCandidate
+import ai.koog.prompt.executor.clients.google.models.GoogleContent
+import ai.koog.prompt.executor.clients.google.models.GoogleData
+import ai.koog.prompt.executor.clients.google.models.GoogleEmbeddingRequest
+import ai.koog.prompt.executor.clients.google.models.GoogleEmbeddingResponse
+import ai.koog.prompt.executor.clients.google.models.GoogleFunctionCallingConfig
+import ai.koog.prompt.executor.clients.google.models.GoogleFunctionCallingMode
+import ai.koog.prompt.executor.clients.google.models.GoogleFunctionDeclaration
+import ai.koog.prompt.executor.clients.google.models.GoogleGenerationConfig
+import ai.koog.prompt.executor.clients.google.models.GoogleModelsResponse
+import ai.koog.prompt.executor.clients.google.models.GooglePart
+import ai.koog.prompt.executor.clients.google.models.GoogleRequest
+import ai.koog.prompt.executor.clients.google.models.GoogleResponse
+import ai.koog.prompt.executor.clients.google.models.GoogleTool
+import ai.koog.prompt.executor.clients.google.models.GoogleToolConfig
 import ai.koog.prompt.executor.clients.google.structure.GoogleBasicJsonSchemaGenerator
 import ai.koog.prompt.executor.clients.google.structure.GoogleResponseFormat
 import ai.koog.prompt.executor.clients.google.structure.GoogleStandardJsonSchemaGenerator
-import ai.koog.prompt.executor.model.LLMChoice
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
-import ai.koog.prompt.message.Attachment
 import ai.koog.prompt.message.AttachmentContent
+import ai.koog.prompt.message.ContentPart
+import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
@@ -30,26 +48,14 @@ import ai.koog.prompt.structure.RegisteredStandardJsonSchemaGenerators
 import ai.koog.prompt.structure.annotations.InternalStructuredOutputApi
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.plugins.sse.SSE
-import io.ktor.client.plugins.sse.SSEClientException
-import io.ktor.client.plugins.sse.sse
-import io.ktor.client.request.accept
-import io.ktor.client.request.parameter
-import io.ktor.client.request.post
-import io.ktor.client.request.setBody
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
-import io.ktor.http.headers
-import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
-import kotlinx.coroutines.Dispatchers
+import io.ktor.utils.io.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import kotlin.time.Clock
@@ -58,9 +64,11 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlin.jvm.JvmOverloads
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -73,6 +81,10 @@ import kotlin.uuid.Uuid
 public class GoogleClientSettings(
     public val baseUrl: String = "https://generativelanguage.googleapis.com",
     public val timeoutConfig: ConnectionTimeoutConfig = ConnectionTimeoutConfig(),
+    public val defaultPath: String = "v1beta/models",
+    public val generateContentMethod: String = "generateContent",
+    public val streamGenerateContentMethod: String = "streamGenerateContent",
+    public val embedContentMethod: String = "embedContent"
 )
 
 /**
@@ -86,20 +98,16 @@ public class GoogleClientSettings(
  * @param baseClient Optional custom HTTP client
  * @param clock Clock instance used for tracking response metadata timestamps.
  */
-public open class GoogleLLMClient(
+public open class GoogleLLMClient @JvmOverloads constructor(
     private val apiKey: String,
     private val settings: GoogleClientSettings = GoogleClientSettings(),
     baseClient: HttpClient = HttpClient(),
     private val clock: Clock = Clock.System
-) : LLMClient {
+) : LLMClient, LLMEmbeddingProvider {
 
     @OptIn(InternalStructuredOutputApi::class)
     private companion object {
         private val logger = KotlinLogging.logger { }
-
-        private const val DEFAULT_PATH = "v1beta/models"
-        private const val DEFAULT_METHOD_GENERATE_CONTENT = "generateContent"
-        private const val DEFAULT_METHOD_STREAM_GENERATE_CONTENT = "streamGenerateContent"
 
         init {
             // On class load register custom Google JSON schema generators for structured output.
@@ -115,7 +123,11 @@ public open class GoogleLLMClient(
         explicitNulls = false
     }
 
-    private val httpClient = baseClient.config {
+    private val httpClient: KoogHttpClient = KoogHttpClient.fromKtorClient(
+        clientName = clientName,
+        logger = logger,
+        baseClient = baseClient
+    ) {
         defaultRequest {
             url(settings.baseUrl)
             url.parameters.append("key", apiKey)
@@ -131,6 +143,13 @@ public open class GoogleLLMClient(
             socketTimeoutMillis = settings.timeoutConfig.socketTimeoutMillis
         }
     }
+
+    /**
+     * Provides the Large Language Model (LLM) provider associated with this client.
+     *
+     * @return The LLM provider, which is Google for this implementation.
+     */
+    override fun llmProvider(): LLMProvider = LLMProvider.Google
 
     override suspend fun execute(prompt: Prompt, model: LLModel, tools: List<ToolDescriptor>): List<Message.Response> {
         logger.debug { "Executing prompt: $prompt with tools: $tools and model: $model" }
@@ -155,61 +174,50 @@ public open class GoogleLLMClient(
             "Model ${model.id} does not support chat completions"
         }
 
-        val request = createGoogleRequest(prompt, model, emptyList())
+        val request = createGoogleRequest(prompt, model, tools)
 
         try {
             httpClient.sse(
-                urlString = "$DEFAULT_PATH/${model.id}:$DEFAULT_METHOD_STREAM_GENERATE_CONTENT",
-                request = {
-                    method = HttpMethod.Post
-                    parameter("alt", "sse")
-                    accept(ContentType.Text.EventStream)
-                    headers {
-                        append(HttpHeaders.CacheControl, "no-cache")
-                        append(HttpHeaders.Connection, "keep-alive")
-                    }
-                    setBody(request)
+                path = "${settings.defaultPath}/${model.id}:${settings.streamGenerateContentMethod}",
+                request = request,
+                requestBodyType = GoogleRequest::class,
+                dataFilter = { it != "[DONE]" },
+                decodeStreamingResponse = { json.decodeFromString<GoogleResponse>(it) },
+                parameters = mapOf("alt" to "sse"),
+                processStreamingChunk = { it }
+            ).collect { response ->
+                val meta = response.usageMetadata?.let {
+                    ResponseMetaInfo.create(
+                        clock = clock,
+                        totalTokensCount = it.totalTokenCount,
+                        inputTokensCount = it.promptTokenCount,
+                        outputTokensCount = it.candidatesTokenCount,
+                    )
                 }
-            ) {
-                incoming.collect { event ->
-                    event
-                        .takeIf { it.data != "[DONE]" }
-                        ?.data?.trim()?.let { json.decodeFromString<GoogleResponse>(it) }
-                        ?.let { response ->
-                            val meta = response.usageMetadata?.let {
-                                ResponseMetaInfo.create(
-                                    clock = clock,
-                                    totalTokensCount = it.totalTokenCount,
-                                    inputTokensCount = it.promptTokenCount,
-                                    outputTokensCount = it.candidatesTokenCount,
-                                )
-                            }
-                            response.candidates.firstOrNull()?.let { candidate ->
-                                candidate.content?.parts?.forEach { part ->
-                                    when (part) {
-                                        is GooglePart.FunctionCall -> emitToolCall(
-                                            id = part.functionCall.id,
-                                            name = part.functionCall.name,
-                                            content = part.functionCall.args?.toString() ?: "{}"
-                                        )
+                response.candidates.firstOrNull()?.let { candidate ->
+                    candidate.content?.parts?.forEach { part ->
+                        when (part) {
+                            is GooglePart.FunctionCall -> emitToolCall(
+                                id = part.functionCall.id,
+                                name = part.functionCall.name,
+                                content = part.functionCall.args?.toString() ?: "{}"
+                            )
 
-                                        is GooglePart.Text -> emitAppend(part.text)
-                                        else -> Unit
-                                    }
-                                }
-                                candidate.finishReason?.let { emitEnd(it, meta) }
-                            }
+                            is GooglePart.Text -> emitAppend(part.text)
+                            else -> Unit
                         }
+                    }
+                    candidate.finishReason?.let { emitEnd(it, meta) }
                 }
             }
-        } catch (e: SSEClientException) {
-            e.response?.let { response ->
-                logger.error { "Error from GoogleAI API: ${response.status}: ${e.message}" }
-                error("Error from GoogleAI API: ${response.status}: ${e.message}")
-            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            logger.error { "Exception during streaming: $e" }
-            error(e.message ?: "Unknown error during streaming")
+            throw LLMClientException(
+                clientName = clientName,
+                message = e.message,
+                cause = e
+            )
         }
     }
 
@@ -243,26 +251,30 @@ public open class GoogleLLMClient(
     private suspend fun getGoogleResponse(prompt: Prompt, model: LLModel, tools: List<ToolDescriptor>): GoogleResponse {
         val request = createGoogleRequest(prompt, model, tools)
 
-        val response = withContext(Dispatchers.SuitableForIO) {
-            val response = httpClient.post("$DEFAULT_PATH/${model.id}:$DEFAULT_METHOD_GENERATE_CONTENT") {
-                setBody(request)
+        try {
+            httpClient.post(
+                path = "${settings.defaultPath}/${model.id}:${settings.generateContentMethod}",
+                request = request,
+                requestBodyType = GoogleRequest::class,
+                responseType = GoogleResponse::class,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw LLMClientException(
+                clientName = clientName,
+                message = e.message,
+                cause = e
+            )
+        }.let { response ->
+
+            // https://discuss.ai.google.dev/t/gemini-2-5-pro-with-empty-response-text/81175/219
+            if (response.candidates.isNotEmpty() && response.candidates.all { it.content?.parts?.isEmpty() == true }) {
+                logger.warn { "Content `parts` field is missing in the response from GoogleAI API: $response" }
             }
 
-            if (response.status.isSuccess()) {
-                response.body<GoogleResponse>()
-            } else {
-                val errorBody = response.bodyAsText()
-                logger.error { "Error from GoogleAI API: ${response.status}: $errorBody" }
-                error("Error from GoogleAI API: ${response.status}: $errorBody")
-            }
+            return response
         }
-
-        // https://discuss.ai.google.dev/t/gemini-2-5-pro-with-empty-response-text/81175/219
-        if (response.candidates.isNotEmpty() && response.candidates.all { it.content?.parts?.isEmpty() == true }) {
-            logger.warn { "Content `parts` field is missing in the response from GoogleAI API: $response" }
-        }
-
-        return response
     }
 
     /**
@@ -273,16 +285,30 @@ public open class GoogleLLMClient(
      * @param tools Tools to include in the request
      * @return A formatted GoogleAI request
      */
-    private fun createGoogleRequest(prompt: Prompt, model: LLModel, tools: List<ToolDescriptor>): GoogleRequest {
+    internal fun createGoogleRequest(prompt: Prompt, model: LLModel, tools: List<ToolDescriptor>): GoogleRequest {
         val systemMessageParts = mutableListOf<GooglePart.Text>()
         val contents = mutableListOf<GoogleContent>()
         val pendingCalls = mutableListOf<GooglePart.FunctionCall>()
+        val pendingResults = mutableListOf<GooglePart.FunctionResponse>()
+        var lastSignature: String? = null
 
         fun flushCalls() {
             if (pendingCalls.isNotEmpty()) {
                 contents += GoogleContent(role = "model", parts = pendingCalls.toList())
                 pendingCalls.clear()
             }
+        }
+
+        fun flushResults() {
+            if (pendingResults.isNotEmpty()) {
+                contents += GoogleContent(role = "user", parts = pendingResults.toList())
+                pendingResults.clear()
+            }
+        }
+
+        fun flushAll() {
+            flushCalls()
+            flushResults()
         }
 
         for (message in prompt.messages) {
@@ -292,13 +318,13 @@ public open class GoogleLLMClient(
                 }
 
                 is Message.User -> {
-                    flushCalls()
+                    flushAll()
                     // User messages become 'user' role content
                     contents.add(message.toGoogleContent(model))
                 }
 
                 is Message.Assistant -> {
-                    flushCalls()
+                    flushAll()
                     contents.add(
                         GoogleContent(
                             role = "model",
@@ -307,36 +333,65 @@ public open class GoogleLLMClient(
                     )
                 }
 
-                is Message.Tool.Result -> {
-                    flushCalls()
-                    contents.add(
-                        GoogleContent(
-                            role = "user",
-                            parts = listOf(
-                                GooglePart.FunctionResponse(
-                                    functionResponse = GoogleData.FunctionResponse(
-                                        id = message.id,
-                                        name = message.tool,
-                                        response = buildJsonObject { put("result", message.content) }
+                is Message.Reasoning -> {
+                    // Reasoning indicates a new step - flush previous step
+                    flushAll()
+
+                    if (message.content.isNotBlank()) {
+                        // If content is present, it's a "Thought Summary" -> Convert to Text part with thought=true
+                        contents.add(
+                            GoogleContent(
+                                role = "model",
+                                parts = listOf(
+                                    GooglePart.Text(
+                                        text = message.content,
+                                        thought = true,
+                                        thoughtSignature = message.encrypted
                                     )
                                 )
+                            )
+                        )
+                    } else {
+                        // If content is empty/blank, it's strictly a signature carrier for the next Tool.Call
+                        lastSignature = message.encrypted
+                    }
+                }
+
+                is Message.Tool.Result -> {
+                    // Just buffer results. We only flush when we know the current tool turn is complete.
+                    pendingResults.add(
+                        GooglePart.FunctionResponse(
+                            functionResponse = GoogleData.FunctionResponse(
+                                id = message.id,
+                                name = message.tool,
+                                response = buildJsonObject { put("result", message.content) }
                             )
                         )
                     )
                 }
 
                 is Message.Tool.Call -> {
+                    // First call in step needs to flush stale results
+                    if (pendingCalls.isEmpty()) {
+                        flushResults()
+                    }
+
+                    // Use signature from preceding Reasoning message
+                    val signature = lastSignature
+                    lastSignature = null // Consume: only first call gets the signature
+
                     pendingCalls += GooglePart.FunctionCall(
                         functionCall = GoogleData.FunctionCall(
                             id = message.id,
                             name = message.tool,
                             args = json.decodeFromString(message.content)
-                        )
+                        ),
+                        thoughtSignature = signature
                     )
                 }
             }
         }
-        flushCalls()
+        flushAll()
 
         val googleTools = tools
             .map { tool ->
@@ -361,7 +416,9 @@ public open class GoogleLLMClient(
             .takeIf { it.isNotEmpty() }
             ?.let { GoogleContent(parts = it) }
 
-        val responseFormat: GoogleResponseFormat? = prompt.params.schema?.let { schema ->
+        val googleParams = prompt.params.toGoogleParams()
+
+        val responseFormat: GoogleResponseFormat? = googleParams.schema?.let { schema ->
             require(schema.capability in model.capabilities) {
                 "Model ${model.id} does not support structured output schema ${schema.name}"
             }
@@ -386,16 +443,16 @@ public open class GoogleLLMClient(
             responseMimeType = responseFormat?.responseMimeType,
             responseSchema = responseFormat?.responseSchema,
             responseJsonSchema = responseFormat?.responseJsonSchema,
-            temperature = if (model.capabilities.contains(LLMCapability.Temperature)) prompt.params.temperature else null,
-            candidateCount = if (model.capabilities.contains(LLMCapability.MultipleChoices)) prompt.params.numberOfChoices else null,
-            maxOutputTokens = 2048,
-            thinkingConfig = GoogleThinkingConfig(
-                includeThoughts = prompt.params.includeThoughts.takeIf { it == true },
-                thinkingBudget = prompt.params.thinkingBudget
-            ).takeIf { it.includeThoughts != null || it.thinkingBudget != null }
+            maxOutputTokens = googleParams.maxTokens,
+            temperature = if (model.capabilities.contains(LLMCapability.Temperature)) googleParams.temperature else null,
+            candidateCount = if (model.capabilities.contains(LLMCapability.MultipleChoices)) googleParams.numberOfChoices else null,
+            topP = googleParams.topP,
+            topK = googleParams.topK,
+            thinkingConfig = googleParams.thinkingConfig,
+            additionalProperties = googleParams.additionalProperties
         )
 
-        val functionCallingConfig = when (val toolChoice = prompt.params.toolChoice) {
+        val functionCallingConfig = when (val toolChoice = googleParams.toolChoice) {
             LLMParams.ToolChoice.Auto -> GoogleFunctionCallingConfig(GoogleFunctionCallingMode.AUTO)
             LLMParams.ToolChoice.None -> GoogleFunctionCallingConfig(GoogleFunctionCallingMode.NONE)
             LLMParams.ToolChoice.Required -> GoogleFunctionCallingConfig(GoogleFunctionCallingMode.ANY)
@@ -420,18 +477,19 @@ public open class GoogleLLMClient(
 
     private fun Message.User.toGoogleContent(model: LLModel): GoogleContent {
         val contentParts = buildList {
-            if (content.isNotEmpty() || attachments.isEmpty()) {
-                add(GooglePart.Text(content))
-            }
-            attachments.forEach { attachment ->
-                when (attachment) {
-                    is Attachment.Image -> {
+            parts.forEach { part ->
+                when (part) {
+                    is ContentPart.Text -> {
+                        add(GooglePart.Text(part.text))
+                    }
+
+                    is ContentPart.Image -> {
                         require(model.capabilities.contains(LLMCapability.Vision.Image)) {
                             "Model ${model.id} does not support images"
                         }
 
-                        val blob: GoogleData.Blob = when (val content = attachment.content) {
-                            is AttachmentContent.Binary -> GoogleData.Blob(attachment.mimeType, content.base64)
+                        val blob: GoogleData.Blob = when (val content = part.content) {
+                            is AttachmentContent.Binary -> GoogleData.Blob(part.mimeType, content.asBytes())
                             else -> throw IllegalArgumentException(
                                 "Unsupported image attachment content: ${content::class}"
                             )
@@ -440,13 +498,13 @@ public open class GoogleLLMClient(
                         add(GooglePart.InlineData(blob))
                     }
 
-                    is Attachment.Audio -> {
+                    is ContentPart.Audio -> {
                         require(model.capabilities.contains(LLMCapability.Audio)) {
                             "Model ${model.id} does not support audio"
                         }
 
-                        val blob: GoogleData.Blob = when (val content = attachment.content) {
-                            is AttachmentContent.Binary -> GoogleData.Blob(attachment.mimeType, content.base64)
+                        val blob: GoogleData.Blob = when (val content = part.content) {
+                            is AttachmentContent.Binary -> GoogleData.Blob(part.mimeType, content.asBytes())
                             else -> throw IllegalArgumentException(
                                 "Unsupported audio attachment content: ${content::class}"
                             )
@@ -455,13 +513,13 @@ public open class GoogleLLMClient(
                         add(GooglePart.InlineData(blob))
                     }
 
-                    is Attachment.File -> {
+                    is ContentPart.File -> {
                         require(model.capabilities.contains(LLMCapability.Document)) {
                             "Model ${model.id} does not support documents"
                         }
 
-                        val blob: GoogleData.Blob = when (val content = attachment.content) {
-                            is AttachmentContent.Binary -> GoogleData.Blob(attachment.mimeType, content.base64)
+                        val blob: GoogleData.Blob = when (val content = part.content) {
+                            is AttachmentContent.Binary -> GoogleData.Blob(part.mimeType, content.asBytes())
                             else -> throw IllegalArgumentException(
                                 "Unsupported file attachment content: ${content::class}"
                             )
@@ -470,13 +528,13 @@ public open class GoogleLLMClient(
                         add(GooglePart.InlineData(blob))
                     }
 
-                    is Attachment.Video -> {
+                    is ContentPart.Video -> {
                         require(model.capabilities.contains(LLMCapability.Vision.Video)) {
                             "Model ${model.id} does not support video"
                         }
 
-                        val blob: GoogleData.Blob = when (val content = attachment.content) {
-                            is AttachmentContent.Binary -> GoogleData.Blob(attachment.mimeType, content.base64)
+                        val blob: GoogleData.Blob = when (val content = part.content) {
+                            is AttachmentContent.Binary -> GoogleData.Blob(part.mimeType, content.asBytes())
                             else -> throw IllegalArgumentException(
                                 "Unsupported video attachment content: ${content::class}"
                             )
@@ -506,6 +564,7 @@ public open class GoogleLLMClient(
                 ToolParameterType.Float -> put("type", "number")
                 ToolParameterType.Integer -> put("type", "integer")
                 ToolParameterType.String -> put("type", "string")
+                ToolParameterType.Null -> put("type", "null")
 
                 is ToolParameterType.Enum -> {
                     put("type", "string")
@@ -515,6 +574,19 @@ public open class GoogleLLMClient(
                 is ToolParameterType.List -> {
                     put("type", "array")
                     put("items", buildJsonObject { putType(type.itemsType) })
+                }
+
+                is ToolParameterType.AnyOf -> {
+                    put(
+                        "anyOf",
+                        buildJsonArray {
+                            addAll(
+                                type.types.map { parameterType ->
+                                    buildGoogleParamType(parameterType)
+                                }
+                            )
+                        }
+                    )
                 }
 
                 is ToolParameterType.Object -> {
@@ -548,30 +620,86 @@ public open class GoogleLLMClient(
      * @return A list of response messages
      */
     @OptIn(ExperimentalUuidApi::class)
-    private fun processGoogleCandidate(candidate: GoogleCandidate, metaInfo: ResponseMetaInfo): List<Message.Response> {
+    internal fun processGoogleCandidate(
+        candidate: GoogleCandidate,
+        metaInfo: ResponseMetaInfo
+    ): List<Message.Response> {
         val parts = candidate.content?.parts.orEmpty()
-        val responses = parts.map { part ->
-            when (part) {
-                is GooglePart.Text -> Message.Assistant(
-                    content = part.text,
-                    finishReason = candidate.finishReason,
-                    metaInfo = metaInfo
-                )
+        val responses = mutableListOf<Message.Response>()
+        with(responses) {
+            parts.forEach { part ->
+                // Create Reasoning for any part with signature (signature carrier),
+                // unless the part itself is a thought (in which case it carries the signature)
+                val signature = part.thoughtSignature
+                val isThought = part.thought == true
+                if (signature != null && !isThought) {
+                    add(Message.Reasoning(encrypted = signature, content = "", metaInfo = metaInfo))
+                }
 
-                is GooglePart.FunctionCall -> Message.Tool.Call(
-                    id = Uuid.random().toString(),
-                    tool = part.functionCall.name,
-                    content = part.functionCall.args.toString(),
-                    metaInfo = metaInfo
-                )
+                when (part) {
+                    is GooglePart.Text -> {
+                        if (isThought) {
+                            add(
+                                Message.Reasoning(
+                                    content = part.text,
+                                    encrypted = signature,
+                                    metaInfo = metaInfo
+                                )
+                            )
+                        } else {
+                            add(
+                                Message.Assistant(
+                                    content = part.text,
+                                    finishReason = candidate.finishReason,
+                                    metaInfo = metaInfo
+                                )
+                            )
+                        }
+                    }
 
-                else -> error("Not supported part type: $part")
+                    is GooglePart.FunctionCall -> {
+                        add(
+                            Message.Tool.Call(
+                                id = Uuid.random().toString(),
+                                tool = part.functionCall.name,
+                                content = part.functionCall.args.toString(),
+                                metaInfo = metaInfo
+                            )
+                        )
+                    }
+
+                    is GooglePart.InlineData -> {
+                        val inlineData = part.inlineData
+                        val contentPart = when (val mimeType = inlineData.mimeType) {
+                            "image/png", "image/jpeg", "image/webp" -> ContentPart.Image(
+                                content = AttachmentContent.Binary.Bytes(inlineData.data),
+                                format = mimeType.substringAfter("image/"),
+                                mimeType = mimeType,
+                            )
+
+                            else -> ContentPart.File(
+                                content = AttachmentContent.Binary.Bytes(inlineData.data),
+                                mimeType = mimeType,
+                                format = mimeType.substringAfterLast('.'),
+                            )
+                        }
+                        add(
+                            Message.Assistant(
+                                parts = listOf(contentPart),
+                                finishReason = candidate.finishReason,
+                                metaInfo = metaInfo
+                            )
+                        )
+                    }
+
+                    else -> throw LLMClientException(clientName, "Not supported part type: $part")
+                }
             }
         }
 
         return when {
-            // Fix the situation when the model decides to both call tools and talk
-            responses.any { it is Message.Tool.Call } -> responses.filterIsInstance<Message.Tool.Call>()
+            // When the model calls tools, keep Reasoning (for signature) and Tool.Call, filter out Assistant text
+            responses.any { it is Message.Tool.Call } -> responses.filter { it is Message.Reasoning || it is Message.Tool.Call }
             // If no messages where returned, return an empty message and check finishReason
             responses.isEmpty() -> listOf(
                 Message.Assistant(
@@ -593,8 +721,8 @@ public open class GoogleLLMClient(
      */
     private fun processGoogleResponse(response: GoogleResponse): List<List<Message.Response>> {
         if (response.candidates.isEmpty()) {
-            logger.error { "Empty candidates in Gemini response" }
-            error("Empty candidates in Gemini response")
+            logger.error { "Empty candidates in Google API response" }
+            throw LLMClientException(clientName, "Empty candidates in Google API response")
         }
 
         // Extract token count from the response
@@ -626,5 +754,74 @@ public open class GoogleLLMClient(
     public override suspend fun moderate(prompt: Prompt, model: LLModel): ModerationResult {
         logger.warn { "Moderation is not supported by Google API" }
         throw UnsupportedOperationException("Moderation is not supported by Google API.")
+    }
+
+    /**
+     * Retrieves a list of available language models supported by the Google LLM client.
+     * https://ai.google.dev/api/models#method:-models.list
+     *
+     * @return A list of strings, each representing a model identifier available for use.
+     */
+    public override suspend fun models(): List<String> {
+        var response: GoogleModelsResponse? = null
+        val models = mutableListOf<String>()
+
+        while ((response == null) || response.nextPageToken != null) {
+            val parameters = response?.nextPageToken?.let {
+                mapOf("pageToken" to it)
+            } ?: emptyMap()
+            try {
+                response = httpClient.get(
+                    settings.defaultPath,
+                    GoogleModelsResponse::class,
+                    parameters = parameters
+                )
+                models.addAll(response.models.map { it.name })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                throw LLMClientException(clientName, e.message, e)
+            }
+        }
+
+        return models
+    }
+
+    override fun close() {
+        httpClient.close()
+    }
+
+    override suspend fun embed(text: String, model: LLModel): List<Double> {
+        require(model.capabilities.contains(LLMCapability.Embed)) {
+            "Model ${model.id} does not support embedding."
+        }
+
+        logger.debug { "Embedding text with model: ${model.id}" }
+
+        val request = GoogleEmbeddingRequest(
+            model = "models/${model.id}",
+            content = GoogleContent(
+                parts = listOf(GooglePart.Text(text))
+            )
+        )
+
+        try {
+            val response = httpClient.post(
+                path = "${settings.defaultPath}/${model.id}:${settings.embedContentMethod}",
+                request = request,
+                requestBodyType = GoogleEmbeddingRequest::class,
+                responseType = GoogleEmbeddingResponse::class,
+            )
+
+            return response.embedding.values
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw LLMClientException(
+                clientName = clientName,
+                message = e.message,
+                cause = e
+            )
+        }
     }
 }

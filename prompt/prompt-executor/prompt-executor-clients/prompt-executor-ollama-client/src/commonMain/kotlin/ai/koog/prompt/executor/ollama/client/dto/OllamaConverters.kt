@@ -1,12 +1,10 @@
 package ai.koog.prompt.executor.ollama.client.dto
 
-import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.prompt.dsl.Prompt
-import ai.koog.prompt.executor.ollama.tools.json.toJSONSchema
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLModel
-import ai.koog.prompt.message.Attachment
 import ai.koog.prompt.message.AttachmentContent
+import ai.koog.prompt.message.ContentPart
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
@@ -51,6 +49,8 @@ internal fun Prompt.toOllamaChatMessages(model: LLModel): List<OllamaChatMessage
                 role = "tool",
                 content = message.content
             )
+
+            is Message.Reasoning -> throw NotImplementedError("Reasoning is not supported by Ollama")
         }
 
         messages.add(converted)
@@ -59,47 +59,49 @@ internal fun Prompt.toOllamaChatMessages(model: LLModel): List<OllamaChatMessage
 }
 
 private fun Message.User.toOllamaChatMessage(model: LLModel): OllamaChatMessageDTO {
-    val images = mutableListOf<String>()
+    val text = StringBuilder()
+    val images = buildList {
+        parts.forEach { part ->
+            when (part) {
+                is ContentPart.Text -> {
+                    text.append(part.text)
+                }
+                is ContentPart.Image -> {
+                    require(LLMCapability.Vision.Image in model.capabilities) {
+                        "Model ${model.id} doesn't support images"
+                    }
 
-    attachments.forEach { attachment ->
-        when (attachment) {
-            is Attachment.Image -> {
-                require(LLMCapability.Vision.Image in model.capabilities) {
-                    "Model ${model.id} doesn't support images"
+                    val image: String = when (val content = part.content) {
+                        is AttachmentContent.Binary -> content.asBase64()
+                        else -> throw IllegalArgumentException("Unsupported image attachment content: ${content::class}")
+                    }
+
+                    add(image)
                 }
 
-                val image: String = when (val content = attachment.content) {
-                    is AttachmentContent.Binary -> content.base64
-                    else -> throw IllegalArgumentException("Unsupported image attachment content: ${content::class}")
+                is ContentPart.File -> {
+                    val fileContent = when (val actualContent = part.content) {
+                        is AttachmentContent.PlainText -> {
+                            actualContent.text
+                        }
+
+                        is AttachmentContent.Binary -> actualContent.asBase64()
+
+                        else -> throw IllegalArgumentException("Unsupported file attachment content: ${content::class}")
+                    }
+
+                    text.append("\n\n$fileContent")
                 }
 
-                images += image
+                else -> throw IllegalArgumentException("Unsupported attachment type: $part")
             }
-
-            else -> throw IllegalArgumentException("Unsupported attachment type: $attachment")
         }
     }
 
     return OllamaChatMessageDTO(
         role = "user",
-        content = this.content,
+        content = text.toString(),
         images = images.takeIf { it.isNotEmpty() }
-    )
-}
-
-/**
- * Converts a ToolDescriptor to an Ollama Tool object.
- */
-internal fun ToolDescriptor.toOllamaTool(): OllamaToolDTO {
-    val jsonSchema = this.toJSONSchema()
-
-    return OllamaToolDTO(
-        type = "function",
-        function = OllamaToolDTO.Definition(
-            name = this.name,
-            description = this.description,
-            parameters = jsonSchema
-        )
     )
 }
 
@@ -109,14 +111,6 @@ internal fun ToolDescriptor.toOllamaTool(): OllamaToolDTO {
 internal fun Prompt.extractOllamaJsonFormat(): JsonObject? {
     val schema = params.schema
     return if (schema is LLMParams.Schema.JSON) schema.schema else null
-}
-
-/**
- * Extracts options from the prompt, if temperature is defined.
- */
-internal fun Prompt.extractOllamaOptions(): OllamaChatRequestDTO.Options? {
-    val temperature = params.temperature
-    return temperature?.let { OllamaChatRequestDTO.Options(temperature = temperature) }
 }
 
 /**

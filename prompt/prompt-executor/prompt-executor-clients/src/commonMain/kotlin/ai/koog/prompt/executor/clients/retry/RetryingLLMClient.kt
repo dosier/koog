@@ -4,8 +4,9 @@ import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.prompt.dsl.ModerationResult
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.executor.clients.LLMClient
-import ai.koog.prompt.executor.model.LLMChoice
+import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.streaming.StreamFrame
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -13,6 +14,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlin.jvm.JvmOverloads
 import kotlin.random.Random
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -32,10 +34,21 @@ import kotlin.time.Duration.Companion.milliseconds
  * @param delegate The LLMClient to wrap with retry logic
  * @param config Configuration for retry behavior
  */
-public class RetryingLLMClient(
+public class RetryingLLMClient @JvmOverloads constructor(
     private val delegate: LLMClient,
-    private val config: RetryConfig = RetryConfig()
+    internal val config: RetryConfig = RetryConfig()
 ) : LLMClient {
+
+    /**
+     * Retrieves the configured instance of the `LLMProvider` in use.
+     *
+     * This method returns the `LLMProvider` instance associated with the client,
+     * facilitating identification or interaction with the specific provider of
+     * large language models (e.g., Google, OpenAI, Meta, etc.).
+     *
+     * @return the current `LLMProvider` associated with this client.
+     */
+    override fun llmProvider(): LLMProvider = delegate.llmProvider()
 
     private companion object {
         private val logger = KotlinLogging.logger { }
@@ -102,6 +115,10 @@ public class RetryingLLMClient(
         delegate.moderate(prompt, model)
     }
 
+    override suspend fun models(): List<String> = withRetry("models") {
+        delegate.models()
+    }
+
     private suspend fun <T> withRetry(
         operation: String,
         block: suspend () -> T
@@ -162,4 +179,22 @@ public class RetryingLLMClient(
 
         return finalMs.milliseconds
     }
+
+    override fun close() {
+        delegate.close()
+    }
 }
+
+/**
+ * Converts an instance of [LLMClient] into a retrying client with customizable retry behavior.
+ *
+ * @param retryConfig Configuration for retry behavior. Defaults to [RetryConfig.DEFAULT].
+ * @return A new instance of [RetryingLLMClient] that adds retry logic to the provided client.
+ */
+public fun LLMClient.toRetryingClient(
+    retryConfig: RetryConfig = RetryConfig.DEFAULT
+): RetryingLLMClient =
+    RetryingLLMClient(
+        delegate = this,
+        config = retryConfig
+    )

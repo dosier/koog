@@ -9,7 +9,6 @@ import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.dsl.extension.nodeLLMRequestStreamingAndSendResults
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.testing.tools.getMockExecutor
-import ai.koog.agents.testing.tools.mockLLMAnswer
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.model.PromptExecutor
@@ -89,7 +88,7 @@ class NodeLLMRequestStreamingAndSendResultsTest {
 
         // Verify streaming events were captured
         val streamingEvents = eventsCollector.collectedEvents.filter {
-            it.contains("OnBeforeStream") || it.contains("OnStreamFrame") || it.contains("OnAfterStream")
+            it.contains("OnLLMStreamingStarting") || it.contains("OnLLMStreamingFrameReceived") || it.contains("OnLLMStreamingCompleted")
         }
         assertTrue(streamingEvents.isNotEmpty(), "Should have captured streaming events")
     }
@@ -132,7 +131,7 @@ class NodeLLMRequestStreamingAndSendResultsTest {
 
         // Verify streaming events occurred
         val streamingEvents = eventsCollector.collectedEvents.filter {
-            it.contains("OnBeforeStream") || it.contains("OnAfterStream")
+            it.contains("OnLLMStreamingStarting") || it.contains("OnLLMStreamingCompleted")
         }
         assertTrue(streamingEvents.isNotEmpty(), "Should have streaming events")
     }

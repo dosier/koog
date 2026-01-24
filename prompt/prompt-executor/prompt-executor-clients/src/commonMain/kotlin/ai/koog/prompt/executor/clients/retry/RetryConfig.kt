@@ -28,9 +28,16 @@ public data class RetryConfig(
         require(maxAttempts >= 1) { "maxAttempts must be at least 1" }
         require(backoffMultiplier >= 1.0) { "backoffMultiplier must be at least 1.0" }
         require(jitterFactor in 0.0..1.0) { "jitterFactor must be between 0.0 and 1.0" }
-        require(initialDelay <= maxDelay) { "initialDelay ($initialDelay) must not be greater than maxDelay ($maxDelay)" }
+        require(initialDelay <= maxDelay) {
+            "initialDelay ($initialDelay) must not be greater than maxDelay ($maxDelay)"
+        }
     }
 
+    /**
+     * Companion object for providing predefined retry configurations and patterns.
+     * Contains default retry logic settings that can be used across different use cases,
+     * along with scoped configurations for conservative, aggressive, and production environments.
+     */
     public companion object {
         /**
          * Default retry patterns that work across all providers.
@@ -92,6 +99,13 @@ public data class RetryConfig(
          * No retry - effectively disables retry logic.
          */
         public val DISABLED: RetryConfig = RetryConfig(maxAttempts = 1)
+
+        /**
+         * The default retry configuration used by clients implementing retry logic.
+         *
+         * Suitable for general-purpose use cases where standard retry behavior is required.
+         */
+        public val DEFAULT: RetryConfig = RetryConfig()
     }
 }
 
@@ -99,6 +113,12 @@ public data class RetryConfig(
  * Pattern for identifying retryable errors.
  */
 public sealed class RetryablePattern {
+    /**
+     * Evaluates whether the given message matches the criteria defined by the implementing class.
+     *
+     * @param message The message to evaluate against the matching criteria.
+     * @return `true` if the message matches the criteria, otherwise `false`.
+     */
     public abstract fun matches(message: String): Boolean
 
     /**
@@ -143,6 +163,12 @@ public sealed class RetryablePattern {
  * Extracts retry-after hints from error messages.
  */
 public fun interface RetryAfterExtractor {
+    /**
+     * Extracts a retry-after duration from the provided error message.
+     *
+     * @param message The error message from which to extract the retry-after duration.
+     * @return The extracted retry-after duration, or null if no valid duration could be determined.
+     */
     public fun extract(message: String): Duration?
 }
 
@@ -153,7 +179,8 @@ public object DefaultRetryAfterExtractor : RetryAfterExtractor {
     private val patterns = listOf(
         Regex("retry\\s+after\\s+(\\d+)\\s+second", RegexOption.IGNORE_CASE),
         Regex("retry-after:\\s*(\\d+)", RegexOption.IGNORE_CASE),
-        Regex("wait\\s+(\\d+)\\s+second", RegexOption.IGNORE_CASE)
+        Regex("wait\\s+(\\d+)\\s+second", RegexOption.IGNORE_CASE),
+        Regex("try again in\\s+(\\d+)(\\.\\d{1,3})?s", RegexOption.IGNORE_CASE)
     )
 
     override fun extract(message: String): Duration? {

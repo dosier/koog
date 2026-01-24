@@ -1,9 +1,10 @@
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.core.agent.config.AIAgentConfig
+import ai.koog.agents.core.agent.execution.path
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.ext.tool.SayToUser
-import ai.koog.agents.snapshot.feature.Persistency
-import ai.koog.agents.snapshot.providers.InMemoryPersistencyStorageProvider
+import ai.koog.agents.snapshot.feature.Persistence
+import ai.koog.agents.snapshot.providers.InMemoryPersistenceStorageProvider
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.llm.OllamaModels
@@ -28,12 +29,12 @@ class SubgraphSetExecutionPointTest {
     fun test_singleSubgraph_teleportForward() = runTest {
         val agent = AIAgent(
             promptExecutor = getMockExecutor { },
-            strategy = createSimpleTeleportSubgraphStrategy("Node2"),
+            strategy = createSimpleTeleportSubgraphStrategy(path = path("teleport-test", "Node2")),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
         ) {
-            install(Persistency) {
-                storage = InMemoryPersistencyStorageProvider("testAgentId")
+            install(Persistence) {
+                storage = InMemoryPersistenceStorageProvider()
             }
         }
 
@@ -52,12 +53,12 @@ class SubgraphSetExecutionPointTest {
     fun test_singleSubgraph_teleportBackwards() = runTest {
         val agent = AIAgent(
             promptExecutor = getMockExecutor { },
-            strategy = createSimpleTeleportSubgraphStrategy("Node1"),
+            strategy = createSimpleTeleportSubgraphStrategy(path = path("teleport-test", "Node1")),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
         ) {
-            install(Persistency) {
-                storage = InMemoryPersistencyStorageProvider("testAgentId")
+            install(Persistence) {
+                storage = InMemoryPersistenceStorageProvider()
             }
         }
 
@@ -84,8 +85,8 @@ class SubgraphSetExecutionPointTest {
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
         ) {
-            install(Persistency) {
-                storage = InMemoryPersistencyStorageProvider("testAgentId")
+            install(Persistence) {
+                storage = InMemoryPersistenceStorageProvider()
             }
         }
 
@@ -109,8 +110,8 @@ class SubgraphSetExecutionPointTest {
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
         ) {
-            install(Persistency) {
-                storage = InMemoryPersistencyStorageProvider("testAgentId")
+            install(Persistence) {
+                storage = InMemoryPersistenceStorageProvider()
             }
         }
 
@@ -132,12 +133,12 @@ class SubgraphSetExecutionPointTest {
     fun test_innerSubgraphs_teleportToOuterSubgraphForward() = runTest {
         val agent = AIAgent(
             promptExecutor = getMockExecutor { },
-            strategy = createSimpleTeleportSubgraphWithInnerSubgraph("sgNode2"),
+            strategy = simpleTeleportSubgraphWithInnerSubgraph("sgNode2"),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
         ) {
-            install(Persistency) {
-                storage = InMemoryPersistencyStorageProvider("testAgentId")
+            install(Persistence) {
+                storage = InMemoryPersistenceStorageProvider()
             }
         }
 
@@ -159,12 +160,12 @@ class SubgraphSetExecutionPointTest {
     fun test_innerSubgraphs_teleportToOuterSubgraphBackwards() = runTest {
         val agent = AIAgent(
             promptExecutor = getMockExecutor { },
-            strategy = createSimpleTeleportSubgraphWithInnerSubgraph("sgNode1"),
+            strategy = simpleTeleportSubgraphWithInnerSubgraph("sgNode1"),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
         ) {
-            install(Persistency) {
-                storage = InMemoryPersistencyStorageProvider("testAgentId")
+            install(Persistence) {
+                storage = InMemoryPersistenceStorageProvider()
             }
         }
 

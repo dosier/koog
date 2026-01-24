@@ -3,7 +3,7 @@ package ai.koog.prompt.executor.ollama.client
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.agents.core.tools.ToolParameterDescriptor
 import ai.koog.agents.core.tools.ToolParameterType
-import ai.koog.prompt.executor.ollama.tools.json.toJSONSchema
+import ai.koog.prompt.executor.ollama.tools.json.OllamaToolDescriptorSchemaGenerator
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -62,7 +62,7 @@ class JSONSchemaFunctionConverterTest {
             ),
         )
 
-        val generatedSchema = json.encodeToString(toolDescriptor.toJSONSchema())
+        val generatedSchema = json.encodeToString(OllamaToolDescriptorSchemaGenerator().generate(toolDescriptor))
 
         val expectedSchema = """
         {
@@ -111,6 +111,92 @@ class JSONSchemaFunctionConverterTest {
             },
             "required": [
                 "locations"
+            ]
+        }
+        """.trimIndent()
+
+        assertEquals(expectedSchema, generatedSchema)
+    }
+
+    @Test
+    fun `test function definition with null type`() {
+        val toolDescriptor = ToolDescriptor(
+            name = "test_tool_with_null",
+            description = "A test tool with a null parameter",
+            requiredParameters = listOf(
+                ToolParameterDescriptor(
+                    name = "nullParam",
+                    description = "A null parameter",
+                    type = ToolParameterType.Null
+                )
+            )
+        )
+
+        val generatedSchema = json.encodeToString(OllamaToolDescriptorSchemaGenerator().generate(toolDescriptor))
+
+        val expectedSchema = """
+        {
+            "title": "test_tool_with_null",
+            "description": "A test tool with a null parameter",
+            "type": "object",
+            "properties": {
+                "nullParam": {
+                    "type": "null",
+                    "description": "A null parameter"
+                }
+            },
+            "required": [
+                "nullParam"
+            ]
+        }
+        """.trimIndent()
+
+        assertEquals(expectedSchema, generatedSchema)
+    }
+
+    @Test
+    fun `test function definition with anyOf type`() {
+        val toolDescriptor = ToolDescriptor(
+            name = "test_tool_with_anyOf",
+            description = "A test tool with anyOf parameter",
+            requiredParameters = listOf(
+                ToolParameterDescriptor(
+                    name = "value",
+                    description = "A value that can be string or number",
+                    type = ToolParameterType.AnyOf(
+                        types = arrayOf(
+                            ToolParameterDescriptor(name = "", description = "String option", type = ToolParameterType.String),
+                            ToolParameterDescriptor(name = "", description = "Number option", type = ToolParameterType.Float)
+                        )
+                    )
+                )
+            )
+        )
+
+        val generatedSchema = json.encodeToString(OllamaToolDescriptorSchemaGenerator().generate(toolDescriptor))
+
+        val expectedSchema = """
+        {
+            "title": "test_tool_with_anyOf",
+            "description": "A test tool with anyOf parameter",
+            "type": "object",
+            "properties": {
+                "value": {
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "description": "String option"
+                        },
+                        {
+                            "type": "number",
+                            "description": "Number option"
+                        }
+                    ],
+                    "description": "A value that can be string or number"
+                }
+            },
+            "required": [
+                "value"
             ]
         }
         """.trimIndent()

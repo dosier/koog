@@ -3,6 +3,7 @@ package ai.koog.agents.features.tracing.writer
 import ai.koog.agents.core.feature.message.FeatureMessage
 import ai.koog.agents.core.feature.writer.FeatureMessageLogWriter
 import io.github.oshai.kotlinlogging.KLogger
+import kotlin.jvm.JvmOverloads
 
 /**
  * A message processor that writes trace events to a logger.
@@ -35,7 +36,7 @@ import io.github.oshai.kotlinlogging.KLogger
  *         addMessageProcessor(TraceFeatureMessageLogWriter(
  *             targetLogger = logger,
  *             format = { message ->
- *                 "[TRACE] ${message.eventId}: ${message::class.simpleName}"
+ *                 "[TRACE] ${message::class.simpleName}"
  *             }
  *         ))
  *     }
@@ -46,7 +47,7 @@ import io.github.oshai.kotlinlogging.KLogger
  * @param logLevel The log level to use for trace events (default: INFO)
  * @param format Optional custom formatter for trace events
  */
-public class TraceFeatureMessageLogWriter(
+public class TraceFeatureMessageLogWriter @JvmOverloads constructor(
     targetLogger: KLogger,
     logLevel: LogLevel = LogLevel.INFO,
     private val format: ((FeatureMessage) -> String)? = null,

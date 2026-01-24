@@ -1,33 +1,58 @@
 package ai.koog.agents.snapshot.providers
 
 import ai.koog.agents.snapshot.feature.AgentCheckpointData
+import ai.koog.agents.snapshot.providers.filters.AgentCheckpointPredicateFilter
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * In-memory implementation of [PersistencyStorageProvider].
+ * In-memory implementation of [PersistenceStorageProvider].
  * This provider stores snapshots in a mutable map.
  */
-public class InMemoryPersistencyStorageProvider(private val persistenceId: String) : PersistencyStorageProvider {
+public class InMemoryPersistenceStorageProvider() : PersistenceStorageProvider<AgentCheckpointPredicateFilter> {
     private val mutex = Mutex()
     private val snapshotMap = mutableMapOf<String, List<AgentCheckpointData>>()
 
-    override suspend fun getCheckpoints(): List<AgentCheckpointData> {
+    override suspend fun getCheckpoints(agentId: String, filter: AgentCheckpointPredicateFilter?): List<AgentCheckpointData> {
         mutex.withLock {
-            return snapshotMap[persistenceId] ?: emptyList()
+            val allCheckpoints = snapshotMap[agentId] ?: emptyList()
+            if (filter != null) {
+                return allCheckpoints.filter { filter.check(it) }
+            }
+            return allCheckpoints
         }
     }
 
-    override suspend fun saveCheckpoint(agentCheckpointData: AgentCheckpointData) {
+    override suspend fun saveCheckpoint(agentId: String, agentCheckpointData: AgentCheckpointData) {
         mutex.withLock {
-            val agentId = persistenceId
             snapshotMap[agentId] = (snapshotMap[agentId] ?: emptyList()) + agentCheckpointData
         }
     }
 
-    override suspend fun getLatestCheckpoint(): AgentCheckpointData? {
+    override suspend fun getLatestCheckpoint(agentId: String, filter: AgentCheckpointPredicateFilter?): AgentCheckpointData? {
         mutex.withLock {
-            return snapshotMap[persistenceId]?.maxBy { it.createdAt }
+            if (filter != null) {
+                return snapshotMap[agentId]?.filter { filter.check(it) }?.maxByOrNull { it.createdAt }
+            }
+
+            return snapshotMap[agentId]?.maxBy { it.version }
+        }
+    }
+
+    /**
+     * Removes all stored checkpoints from the in-memory storage. If a filter is provided,
+     * this method will determine which checkpoints to remove based on the filter's logic.
+     *
+     * @param filter Optional filter to determine whether any checkpoints should be removed
+     *               conditionally. If `null`, all checkpoints will be removed unconditionally.
+     */
+    public suspend fun removeCheckpoints(filter: AgentCheckpointPredicateFilter? = null) {
+        mutex.withLock {
+            if (filter != null) {
+                snapshotMap.keys.forEach { agentId -> snapshotMap[agentId] = snapshotMap[agentId]!!.filterNot { filter.check(it) } }
+            } else {
+                snapshotMap.clear()
+            }
         }
     }
 }

@@ -161,11 +161,15 @@ Sets the sampling strategy to control which spans are collected. Takes the follo
 
 #### setVerbose
 
-Enables or disables verbose logging for debugging OpenTelemetry configuration. Takes the following argument:
+Enables or disables verbose logging. Takes the following argument:
 
 | Name      | Data type | Required | Default value | Description                                                     |
 |-----------|-----------|----------|---------------|-----------------------------------------------------------------|
 | `verbose` | `Boolean` | Yes      | `false`       | If true, the application collects more detailed telemetry data. |
+
+!!! note
+
+    Some content of OpenTelemetry spans is masked by default for security reasons. For example, LLM messages are masked as `HIDDEN:non-empty` instead of the actual message content. To get the content, set the value of the `verbose` argument to `true`.
 
 #### setSdk
 
@@ -174,9 +178,9 @@ Injects a pre-configured OpenTelemetrySdk instance.
 - When you call setSdk(sdk), the provided SDK is used as-is, and any custom configuration applied via addSpanExporter, addSpanProcessor, addResourceAttributes, or setSampler is ignored.
 - The tracer’s instrumentation scope name/version are aligned with your service info.
 
-| Name | Data type         | Required | Description                           |
-|------|-------------------|----------|---------------------------------------|
-| `sdk`| `OpenTelemetrySdk`| Yes      | The SDK instance to use in the agent. |
+| Name  | Data type          | Required | Description                           |
+|-------|--------------------|----------|---------------------------------------|
+| `sdk` | `OpenTelemetrySdk` | Yes      | The SDK instance to use in the agent. |
 
 ### Advanced configuration
 
@@ -288,7 +292,9 @@ The OpenTelemetry feature automatically creates different types of spans to trac
 
 - **CreateAgentSpan**: created when you run an agent, closed when the agent is closed or the process is terminated.
 - **InvokeAgentSpan**: the invocation of an agent.
+- **StrategySpan**: the execution of an agent's strategy (the top-level execution flow).
 - **NodeExecuteSpan**: the execution of a node in the agent's strategy. This is a custom, Koog-specific span.
+- **SubgraphExecuteSpan**: the execution of a subgraph within the agent strategy. This is a custom, Koog-specific span.
 - **InferenceSpan**: an LLM call.
 - **ExecuteToolSpan**: a tool call.
 
@@ -297,12 +303,14 @@ Spans are organized in a nested, hierarchical structure. Here is an example of a
 ```text
 CreateAgentSpan
     InvokeAgentSpan
-        NodeExecuteSpan
-            InferenceSpan
-        NodeExecuteSpan
-            ExecuteToolSpan
-        NodeExecuteSpan
-            InferenceSpan    
+        StrategySpan
+            NodeExecuteSpan
+                InferenceSpan
+            NodeExecuteSpan
+                ExecuteToolSpan
+            SubgraphExecuteSpan
+                NodeExecuteSpan
+                    InferenceSpan
 ```
 
 ### Span attributes
@@ -314,12 +322,17 @@ Koog supports a list of predefined attributes that follow OpenTelemetry's [Seman
 `gen_ai.conversation.id`, which is usually a required attribute for a span. In Koog, the value of this attribute is the 
 unique identifier for an agent run, that is automatically set when you call the `agent.run()` method.
 
-In addition, Koog also includes custom, Koog-specific attributes. You can recognize most of these attributes by the 
+In addition, Koog also includes custom, Koog-specific attributes. You can recognize most of these attributes by the
 `koog.` prefix. Here are the available custom attributes:
 
-- `koog.agent.strategy.name`: the name of the agent strategy. A strategy is a Koog-related entity that describes the 
-purpose of the agent. Used in the `InvokeAgentSpan` span.
-- `koog.node.name`: the name of the node being run. Used in the `NodeExecuteSpan` span.
+- `koog.strategy.name`: the name of the agent strategy. A strategy is a Koog-related entity that describes the
+purpose of the agent. Used in the `StrategySpan` span.
+- `koog.node.id`: the identifier (name) of the node being executed. Used in the `NodeExecuteSpan` span.
+- `koog.node.input`: the input passed to the node at the beginning of execution. Present on `NodeExecuteSpan` when node starts.
+- `koog.node.output`: the output produced by the node upon completion. Present on `NodeExecuteSpan` when node completes successfully.
+- `koog.subgraph.id`: the identifier (name) of the subgraph being executed. Used in the `SubgraphExecuteSpan` span.
+- `koog.subgraph.input`: the input passed to the subgraph at the beginning of execution. Present on `SubgraphExecuteSpan` when subgraph starts.
+- `koog.subgraph.output`: the output produced by the subgraph upon completion. Present on `SubgraphExecuteSpan` when subgraph completes successfully.
 
 ### Events
 
@@ -588,7 +601,7 @@ Here is the full code sample:
 <!--- INCLUDE
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.features.opentelemetry.feature.OpenTelemetry
-import ai.koog.agents.utils.use
+import ai.koog.utils.io.use
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
 import io.opentelemetry.exporter.logging.LoggingSpanExporter
@@ -603,7 +616,7 @@ fun main() {
     runBlocking {
         val agent = AIAgent(
             promptExecutor = simpleOpenAIExecutor(openAIApiKey),
-            llmModel = OpenAIModels.Reasoning.O4Mini,
+            llmModel = OpenAIModels.Chat.O4Mini,
             systemPrompt = "You are a code assistant. Provide concise code examples."
         ) {
             install(OpenTelemetry) {

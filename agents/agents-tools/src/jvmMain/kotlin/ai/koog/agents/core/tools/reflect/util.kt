@@ -4,9 +4,12 @@ import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.agents.core.tools.ToolParameterDescriptor
 import ai.koog.agents.core.tools.ToolParameterType
 import ai.koog.agents.core.tools.ToolRegistry
+import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
 import ai.koog.agents.core.tools.annotations.LLMDescription
 import ai.koog.agents.core.tools.annotations.Tool
+import ai.koog.agents.core.tools.serialization.ToolJson
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 import kotlin.reflect.KClass
 import kotlin.reflect.KFunction
 import kotlin.reflect.KParameter
@@ -17,6 +20,7 @@ import kotlin.reflect.full.instanceParameter
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.jvm.javaMethod
 import kotlin.reflect.jvm.kotlinFunction
+import ai.koog.agents.core.tools.Tool as ToolType
 
 /**
  * Converts all instance methods of [this] class marked as [Tool] to a list of tools.
@@ -50,7 +54,8 @@ import kotlin.reflect.jvm.kotlinFunction
  * val tools = myToolset.asTools()
  * ```
  */
-public fun ToolSet.asTools(json: Json = Json): List<ToolFromCallable> {
+@OptIn(InternalAgentToolsApi::class)
+public fun ToolSet.asTools(json: Json = ToolJson): List<ToolType<ToolFromCallable.VarArgs, *>> {
     return this::class.asTools(json = json, thisRef = this)
 }
 
@@ -87,7 +92,8 @@ public fun ToolSet.asTools(json: Json = Json): List<ToolFromCallable> {
  * val tools = myToolset.asToolsByInterface<MyToolsetInterface>() // only interface methods will be added
  * ```
  */
-public inline fun <reified T : ToolSet> T.asToolsByInterface(json: Json = Json): List<ToolFromCallable> {
+@OptIn(InternalAgentToolsApi::class)
+public inline fun <reified T : ToolSet> T.asToolsByInterface(json: Json = ToolJson): List<ToolType<ToolFromCallable.VarArgs, *>> {
     return T::class.asTools(json = json, thisRef = this)
 }
 
@@ -100,9 +106,10 @@ public inline fun <reified T : ToolSet> T.asToolsByInterface(json: Json = Json):
  * @param toolSet The [ToolSet] containing the tools to be registered.
  * @param json The Json instance to use for serialization. Defaults to a standard `Json` instance if not provided.
  */
+@OptIn(InternalAgentToolsApi::class)
 public fun ToolRegistry.Builder.tools(
     toolSet: ToolSet,
-    json: Json = Json
+    json: Json = ToolJson
 ) {
     tools(toolSet.asTools(json = json))
 }
@@ -115,7 +122,11 @@ public fun ToolRegistry.Builder.tools(
 
  * @see [asTool]
  */
-public fun <T : ToolSet> KClass<out T>.asTools(json: Json = Json, thisRef: T? = null): List<ToolFromCallable> {
+@OptIn(InternalAgentToolsApi::class)
+public fun <T : ToolSet> KClass<out T>.asTools(
+    json: Json = ToolJson,
+    thisRef: T? = null
+): List<ToolType<ToolFromCallable.VarArgs, *>> {
     return this.functions.filter { m ->
         m.getPreferredToolAnnotation() != null
     }.map {
@@ -175,19 +186,27 @@ public fun <T : ToolSet> KClass<out T>.asTools(json: Json = Json, thisRef: T? = 
  * val tool = MyTools::my_best_tool.asTool(json = Json, thisRef = myTools)
  * ```
  */
-public fun KFunction<*>.asTool(
-    json: Json = Json,
+@OptIn(InternalAgentToolsApi::class)
+public fun <A> KFunction<A>.asTool(
+    json: Json = ToolJson,
     thisRef: Any? = null,
     name: String? = null,
     description: String? = null
-): ToolFromCallable {
+): ToolType<ToolFromCallable.VarArgs, A> {
     val toolDescriptor = this.asToolDescriptor(name = name, description = description)
     if (instanceParameter != null &&
         thisRef == null
     ) {
         error("Instance parameter is not null, but no 'this' object is provided")
     }
-    return ToolFromCallable(callable = this, thisRef = thisRef, descriptor = toolDescriptor, json = json)
+    @Suppress("UNCHECKED_CAST")
+    return ToolFromCallable(
+        callable = this,
+        thisRef = thisRef,
+        descriptor = toolDescriptor,
+        json = json,
+        resultSerializer = serializer(returnType)
+    ) as ToolType<ToolFromCallable.VarArgs, A>
 }
 
 /**
@@ -203,13 +222,14 @@ public fun KFunction<*>.asTool(
  * @param name An optional name to uniquely identify the tool in the registry. If `null`, a default name derived from the function will be used.
  * @param description An optional description of the tool functionality. Useful for documentation and explanatory purposes.
  */
+@OptIn(InternalAgentToolsApi::class)
 public fun ToolRegistry.Builder.tool(
     toolFunction: KFunction<*>,
-    json: Json = Json,
+    json: Json = ToolJson,
     thisRef: Any? = null,
     name: String? = null,
     description: String? = null
-) {
+): ToolRegistry.Builder = apply {
     tool(toolFunction.asTool(json, thisRef, name, description))
 }
 
@@ -319,7 +339,7 @@ public fun KFunction<*>.asToolDescriptor(name: String? = null, description: Stri
  * such as its name, type, and description.
  * @property isOptional Indicates whether this parameter is optional.
  */
-private class ParamInfo(
+internal class ParamInfo(
     val descriptor: ToolParameterDescriptor,
     val isOptional: Boolean
 )

@@ -1,7 +1,10 @@
 # Complex workflow agents
 
-In addition to single-run agents, the `AIAgent` class lets you build agents that handle complex workflows by defining 
+In addition to basic agents, the `AIAgent` class lets you build agents that handle complex workflows by defining 
 custom strategies, tools, configurations, and custom input/output types.
+
+!!! tip
+    If you are new to Koog and want to create the simplest agent, start with [Basic agents](basic-agents.md).
 
 The process of creating and configuring such an agent typically includes the following steps:
 
@@ -14,13 +17,13 @@ The process of creating and configuring such an agent typically includes the fol
 
 ## Prerequisites
 
-- You have a valid API key from the LLM provider used to implement an AI agent. For a list of all available providers, see [Overview](index.md).
+- You have a valid API key from the LLM provider used to implement an AI agent. For a list of all available providers, see [LLM providers](llm-providers.md).
 
 !!! tip
     Use environment variables or a secure configuration management system to store your API keys.
     Avoid hardcoding API keys directly in your source code.
 
-## Creating a single-run agent
+## Creating a complex workflow agent
 
 ### 1. Add dependencies
 
@@ -32,14 +35,14 @@ dependencies {
 }
 ```
 
-For all available installation methods, see [Installation](index.md#installation).
+For all available installation methods, see [Install Koog](getting-started.md#install-koog).
 
 ### 2. Provide a prompt executor
 
 Prompt executors manage and run prompts.
 You can choose a prompt executor based on the LLM provider you plan to use.
 Also, you can create a custom prompt executor using one of the available LLM clients.
-To learn more, see [Prompt executors](prompt-api.md#prompt-executors).
+To learn more, see [Prompt executors](prompts/prompt-executors.md).
 
 For example, to provide the OpenAI prompt executor, you need to call the `simpleOpenAIExecutor` function and provide it with the API key required for authentication with the OpenAI service:
 
@@ -67,15 +70,15 @@ val anthropicClient = AnthropicLLMClient(System.getenv("ANTHROPIC_KEY"))
 val googleClient = GoogleLLMClient(System.getenv("GOOGLE_KEY"))
 ```
 <!--- KNIT example-complex-workflow-agents-02.kt -->
-2) Pass the configured clients to the `DefaultMultiLLMPromptExecutor` class constructor to create a prompt executor with multiple LLM providers:
+2) Pass the configured clients to the `MultiLLMPromptExecutor` class constructor to create a prompt executor with multiple LLM providers:
 <!--- INCLUDE
 import ai.koog.agents.example.exampleComplexWorkflowAgents02.anthropicClient
 import ai.koog.agents.example.exampleComplexWorkflowAgents02.googleClient
 import ai.koog.agents.example.exampleComplexWorkflowAgents02.openAIClient
-import ai.koog.prompt.executor.llms.all.DefaultMultiLLMPromptExecutor
+import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
 -->
 ```kotlin
-val multiExecutor = DefaultMultiLLMPromptExecutor(openAIClient, anthropicClient, googleClient)
+val multiExecutor = MultiLLMPromptExecutor(openAIClient, anthropicClient, googleClient)
 ```
 <!--- KNIT example-complex-workflow-agents-03.kt -->
 
@@ -115,6 +118,7 @@ val processNode by node<InputType, OutputType> { input ->
 }
 ```
 <!--- KNIT example-complex-workflow-agents-04.kt -->
+
 !!! tip
     There are also pre-defined nodes that you can use in your agent strategy. To learn more, see [Predefined nodes and components](nodes-and-components.md).
 
@@ -165,6 +169,7 @@ edge(sourceNode forwardTo targetNode transformed { output ->
 edge(sourceNode forwardTo targetNode onCondition { it.isNotEmpty() } transformed { it.uppercase() })
 ```
 <!--- KNIT example-complex-workflow-agents-05.kt -->
+
 #### 3.2. Implement the strategy
 
 To implement the agent strategy, call the `strategy` function and define nodes and edges. For example:
@@ -314,8 +319,8 @@ To install the feature, call the `install` function and provide the feature as a
 For example, to install the event handler feature, you need to do the following:
 <!--- INCLUDE
 import ai.koog.agents.core.agent.AIAgent
-import ai.koog.agents.core.feature.handler.AgentFinishedContext
-import ai.koog.agents.core.feature.handler.AgentStartContext
+import ai.koog.agents.core.feature.handler.agent.AgentCompletedContext
+import ai.koog.agents.core.feature.handler.agent.AgentStartingContext
 import ai.koog.agents.features.eventHandler.feature.EventHandler
 import ai.koog.prompt.executor.llms.all.simpleOllamaAIExecutor
 import ai.koog.prompt.llm.OllamaModels
@@ -331,10 +336,10 @@ val agent = AIAgent(
 // install the EventHandler feature
 installFeatures = {
     install(EventHandler) {
-        onBeforeAgentStarted { eventContext: AgentStartContext<*> ->
+        onAgentStarting { eventContext: AgentStartingContext ->
             println("Starting agent: ${eventContext.agent.id}")
         }
-        onAgentFinished { eventContext: AgentFinishedContext ->
+        onAgentCompleted { eventContext: AgentCompletedContext ->
             println("Result: ${eventContext.result}")
         }
     }
@@ -349,8 +354,8 @@ To learn more about feature configuration, see the dedicated page.
 Create the agent with the configuration option created in the previous stages and run it with the provided input:
 <!--- INCLUDE
 import ai.koog.agents.core.agent.AIAgent
-import ai.koog.agents.core.feature.handler.AgentFinishedContext
-import ai.koog.agents.core.feature.handler.AgentStartContext
+import ai.koog.agents.core.feature.handler.agent.AgentCompletedContext
+import ai.koog.agents.core.feature.handler.agent.AgentStartingContext
 import ai.koog.agents.example.exampleComplexWorkflowAgents01.promptExecutor
 import ai.koog.agents.example.exampleComplexWorkflowAgents06.agentStrategy
 import ai.koog.agents.example.exampleComplexWorkflowAgents07.agentConfig
@@ -366,10 +371,10 @@ val agent = AIAgent(
     agentConfig = agentConfig,
     installFeatures = {
         install(EventHandler) {
-            onBeforeAgentStarted { eventContext: AgentStartContext<*> ->
+            onAgentStarting { eventContext: AgentStartingContext ->
                 println("Starting agent: ${eventContext.agent.id}")
             }
-            onAgentFinished { eventContext: AgentFinishedContext ->
+            onAgentCompleted { eventContext: AgentCompletedContext ->
                 println("Result: ${eventContext.result}")
             }
         }
@@ -391,7 +396,7 @@ fun main() {
 
 ## Working with structured data
 
-The `AIAgent` can process structured data from LLM outputs. For more details, see [Structured data processing](structured-data.md).
+The `AIAgent` can process structured data from LLM outputs. For more details, see [Structured data processing](structured-output.md).
 
 ## Using parallel tool calls
 
@@ -408,8 +413,8 @@ import ai.koog.agents.core.agent.config.AIAgentConfig
 import ai.koog.agents.core.dsl.builder.forwardTo
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.dsl.extension.*
-import ai.koog.agents.core.feature.handler.AgentFinishedContext
-import ai.koog.agents.core.feature.handler.AgentStartContext
+import ai.koog.agents.core.feature.handler.agent.AgentCompletedContext
+import ai.koog.agents.core.feature.handler.agent.AgentStartingContext
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.core.tools.annotations.LLMDescription
 import ai.koog.agents.core.tools.annotations.Tool
@@ -509,10 +514,10 @@ val agent = AIAgent(
     agentConfig = agentConfig,
     installFeatures = {
         install(EventHandler) {
-            onBeforeAgentStarted { eventContext: AgentStartContext<*> ->
+            onAgentStarting { eventContext: AgentStartingContext ->
                 println("Starting agent: ${eventContext.agent.id}")
             }
-            onAgentFinished { eventContext: AgentFinishedContext ->
+            onAgentCompleted { eventContext: AgentCompletedContext ->
                 println("Result: ${eventContext.result}")
             }
         }

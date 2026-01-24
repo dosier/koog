@@ -2,7 +2,7 @@ package ai.koog.agents.core.feature.writer
 
 import ai.koog.agents.core.feature.message.FeatureMessage
 import ai.koog.agents.core.feature.model.FeatureStringMessage
-import ai.koog.agents.utils.use
+import ai.koog.utils.io.use
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -38,7 +38,7 @@ class FeatureMessageFileWriterTest {
 
         override fun FeatureMessage.toFileString(): String {
             return when (this) {
-                is TestFeatureEventMessage -> "[${this.messageType.value}] ${this.eventId}"
+                is TestFeatureEventMessage -> "[${this.messageType.value}] ${this.testMessage}"
                 is FeatureStringMessage -> "[${this.messageType.value}] ${this.message}"
                 else -> "UNDEFINED"
             }
@@ -80,7 +80,7 @@ class FeatureMessageFileWriterTest {
             val jobs = List(jobCount) { number ->
                 cs.launch(Dispatchers.Default) {
                     writer.initialize()
-                    writer.processMessage(FeatureStringMessage("Test message $number"))
+                    writer.onMessage(FeatureStringMessage("Test message $number"))
                 }
             }
 
@@ -104,7 +104,7 @@ class FeatureMessageFileWriterTest {
         val writer = TestFeatureMessageFileWriter(tempDir)
 
         val throwable = assertThrows<IllegalStateException> {
-            writer.processMessage(message = FeatureStringMessage("test-message"))
+            writer.onMessage(message = FeatureStringMessage("test-message"))
         }
 
         val expectedError = "Writer is not initialized. Please make sure you call method 'initialize()' before."
@@ -117,15 +117,15 @@ class FeatureMessageFileWriterTest {
         TestFeatureMessageFileWriter(tempDir).use { writer ->
             writer.initialize()
 
-            val stringMessage = FeatureStringMessage("Test message")
-            val eventMessage = TestFeatureEventMessage("Test event")
+            val stringMessage = FeatureStringMessage(message = "Test message")
+            val eventMessage = TestFeatureEventMessage(testMessage = "Test event")
 
-            writer.processMessage(stringMessage)
-            writer.processMessage(eventMessage)
+            writer.onMessage(stringMessage)
+            writer.onMessage(eventMessage)
 
             val expectedContent = listOf(
                 "[${stringMessage.messageType.value}] ${stringMessage.message}",
-                "[${eventMessage.messageType.value}] ${eventMessage.eventId}"
+                "[${eventMessage.messageType.value}] ${eventMessage.testMessage}"
             )
 
             val actualContent = writer.targetPath.readLines()
@@ -147,7 +147,7 @@ class FeatureMessageFileWriterTest {
                 val message = FeatureStringMessage("Test message $number")
 
                 cs.launch(Dispatchers.Default) {
-                    writer.processMessage(message)
+                    writer.onMessage(message)
                 }
             }
 
@@ -206,7 +206,7 @@ class FeatureMessageFileWriterTest {
         assertFalse(writer.isOpen.value)
 
         val throwable = assertThrows<IllegalStateException> {
-            writer.processMessage(message = FeatureStringMessage("test-message"))
+            writer.onMessage(message = FeatureStringMessage("test-message"))
         }
 
         val expectedError = "Writer is not initialized. Please make sure you call method 'initialize()' before."

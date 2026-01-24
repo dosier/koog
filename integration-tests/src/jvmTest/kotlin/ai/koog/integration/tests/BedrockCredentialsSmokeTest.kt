@@ -2,10 +2,10 @@ package ai.koog.integration.tests
 
 import aws.sdk.kotlin.services.bedrock.BedrockClient
 import aws.sdk.kotlin.services.bedrock.listFoundationModels
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
-import kotlin.test.Test
-import kotlin.test.assertTrue
 
 /**
  * Verifies that the credentials provided to the build can access the Bedrock control-plane
@@ -22,11 +22,20 @@ class BedrockCredentialsSmokeTest {
         val region = System.getenv("AWS_REGION") ?: "us-west-2"
 
         BedrockClient { this.region = region }.use { bedrock ->
-            val resp = bedrock.listFoundationModels { }
-            assertTrue(
-                (resp.modelSummaries?.isNotEmpty()) == true,
-                "Bedrock ListFoundationModels returned no models – credentials/region might be wrong"
-            )
+            bedrock.listFoundationModels { }.modelSummaries?.shouldNotBeEmpty()
+        }
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "AWS_BEARER_TOKEN_BEDROCK", matches = ".+")
+    @EnabledIfEnvironmentVariable(named = "KOOG_HEAVY_TESTS", matches = "true")
+    fun bedrockApiKeyAuthenticationWorks() = runBlocking {
+        val region = System.getenv("AWS_REGION") ?: "us-east-1"
+
+        BedrockClient {
+            this.region = region
+        }.use { bedrock ->
+            bedrock.listFoundationModels { }.modelSummaries?.shouldNotBeEmpty()
         }
     }
 }

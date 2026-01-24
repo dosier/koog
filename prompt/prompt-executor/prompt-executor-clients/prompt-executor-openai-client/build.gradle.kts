@@ -19,7 +19,7 @@ kotlin {
             }
         }
 
-        commonTest {
+        jvmTest {
             dependencies {
                 implementation(project(":test-utils"))
             }
@@ -27,6 +27,7 @@ kotlin {
 
         jvmTest {
             dependencies {
+                implementation(libs.ktor.client.cio)
             }
         }
     }

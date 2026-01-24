@@ -9,6 +9,8 @@ import kotlinx.coroutines.runBlocking
 import kotlin.time.Clock
 import kotlinx.serialization.json.JsonPrimitive
 import org.jetbrains.exposed.sql.Database
+import org.junit.jupiter.api.parallel.Execution
+import org.junit.jupiter.api.parallel.ExecutionMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -20,62 +22,68 @@ import kotlin.test.assertNull
  * Focuses on H2 in-memory database for actual functionality tests
  * and compilation verification for other providers.
  */
+@Execution(ExecutionMode.SAME_THREAD)
 class SQLPersistenceProvidersTest {
 
     @Test
     fun `test save and retrieve checkpoint`() = runBlocking {
-        val provider = H2PersistencyStorageProvider.inMemory(
-            persistenceId = "test-agent",
+        val agentId = "test-agent"
+        val provider = H2PersistenceStorageProvider.inMemory(
             databaseName = "test_db"
         )
 
         provider.migrate()
 
         // Create and save checkpoint
-        val checkpoint = createTestCheckpoint("test-1")
-        provider.saveCheckpoint(checkpoint)
+        val checkpoint = createTestCheckpoint("test-1", 0L)
+        provider.saveCheckpoint(agentId, checkpoint)
 
         // Retrieve and verify
-        val retrieved = provider.getLatestCheckpoint()
+        val retrieved = provider.getLatestCheckpoint(agentId)
         assertNotNull(retrieved)
         assertEquals(checkpoint.checkpointId, retrieved.checkpointId)
-        assertEquals(checkpoint.nodeId, retrieved.nodeId)
+        assertEquals(checkpoint.nodePath, retrieved.nodePath)
         assertEquals(checkpoint.messageHistory.size, retrieved.messageHistory.size)
     }
 
     @Test
     fun `test multiple checkpoints and ordering`() = runBlocking {
-        val provider = H2PersistencyStorageProvider.inMemory(
-            persistenceId = "test-agent",
+        val agentId = "test-agent"
+        val provider = H2PersistenceStorageProvider.inMemory(
             databaseName = "test_ordering"
         )
 
         provider.migrate()
 
         // Save multiple checkpoints
-        provider.saveCheckpoint(createTestCheckpoint("checkpoint-1"))
-        provider.saveCheckpoint(createTestCheckpoint("checkpoint-2"))
-        provider.saveCheckpoint(createTestCheckpoint("checkpoint-3"))
+        val checkpoint1 = createTestCheckpoint("checkpoint-1", 0L)
+        val checkpoint2 = createTestCheckpoint("checkpoint-2", checkpoint1.version.plus(1))
+        val checkpoint3 = createTestCheckpoint("checkpoint-3", checkpoint2.version.plus(1))
+
+        provider.saveCheckpoint(agentId, checkpoint1)
+        provider.saveCheckpoint(agentId, checkpoint2)
+        provider.saveCheckpoint(agentId, checkpoint3)
 
         // Verify count and ordering
-        val allCheckpoints = provider.getCheckpoints()
+        val allCheckpoints = provider.getCheckpoints(agentId)
         assertEquals(3, allCheckpoints.size)
         assertEquals("checkpoint-1", allCheckpoints[0].checkpointId)
         assertEquals("checkpoint-3", allCheckpoints[2].checkpointId)
 
         // Verify latest
-        val latest = provider.getLatestCheckpoint()
+        val latest = provider.getLatestCheckpoint(agentId)
         assertEquals("checkpoint-3", latest?.checkpointId)
     }
 
     @Test
     fun `test persistence ID isolation`() = runBlocking {
-        val provider1 = H2PersistencyStorageProvider.inMemory(
-            persistenceId = "agent-1",
+        val agentId = "test-agent"
+        val agentId2 = "test-agent2"
+
+        val provider1 = H2PersistenceStorageProvider.inMemory(
             databaseName = "shared_db"
         )
-        val provider2 = H2PersistencyStorageProvider.inMemory(
-            persistenceId = "agent-2",
+        val provider2 = H2PersistenceStorageProvider.inMemory(
             databaseName = "shared_db" // Same database
         )
 
@@ -83,12 +91,12 @@ class SQLPersistenceProvidersTest {
         provider2.migrate()
 
         // Save to different agents
-        provider1.saveCheckpoint(createTestCheckpoint("agent1-data"))
-        provider2.saveCheckpoint(createTestCheckpoint("agent2-data"))
+        provider1.saveCheckpoint(agentId, createTestCheckpoint("agent1-data", 0L))
+        provider2.saveCheckpoint(agentId2, createTestCheckpoint("agent2-data", 0L))
 
         // Verify isolation
-        val agent1Checkpoints = provider1.getCheckpoints()
-        val agent2Checkpoints = provider2.getCheckpoints()
+        val agent1Checkpoints = provider1.getCheckpoints(agentId)
+        val agent2Checkpoints = provider2.getCheckpoints(agentId2)
 
         assertEquals(1, agent1Checkpoints.size)
         assertEquals(1, agent2Checkpoints.size)
@@ -98,8 +106,9 @@ class SQLPersistenceProvidersTest {
 
     @Test
     fun `test TTL expiration`() = runBlocking {
-        val provider = H2PersistencyStorageProvider.inMemory(
-            persistenceId = "ttl-test",
+        val agentId = "test-agent"
+
+        val provider = H2PersistenceStorageProvider.inMemory(
             databaseName = "ttl_db",
             ttlSeconds = 1 // 1 second TTL
         )
@@ -107,27 +116,26 @@ class SQLPersistenceProvidersTest {
         provider.migrate()
 
         // Save checkpoint
-        provider.saveCheckpoint(createTestCheckpoint("expire-soon"))
-        assertEquals(1, provider.getCheckpointCount())
+        provider.saveCheckpoint(agentId, createTestCheckpoint("expire-soon", 0L))
+        assertEquals(1, provider.getCheckpointCount(agentId))
 
         // Wait for expiration
         delay(1500)
         provider.conditionalCleanup()
         // Should be cleaned up on next operation
-        val afterExpiry = provider.getLatestCheckpoint()
+        val afterExpiry = provider.getLatestCheckpoint(agentId)
         assertNull(afterExpiry)
-        assertEquals(0, provider.getCheckpointCount())
+        assertEquals(0, provider.getCheckpointCount(agentId))
     }
 
     @Test
     fun `verify all providers can be instantiated`() {
         // H2
-        assertNotNull(H2PersistencyStorageProvider.inMemory("test", "test_db"))
+        assertNotNull(H2PersistenceStorageProvider.inMemory("test", "test_db"))
 
         // PostgreSQL
         assertNotNull(
-            PostgresPersistencyStorageProvider(
-                persistenceId = "test",
+            PostgresPersistenceStorageProvider(
                 database = Database.connect(
                     url = "jdbc:postgresql://localhost:5432/test",
                     driver = "org.postgresql.Driver",
@@ -139,8 +147,7 @@ class SQLPersistenceProvidersTest {
 
         // MySQL
         assertNotNull(
-            MySQLPersistencyStorageProvider(
-                persistenceId = "test",
+            MySQLPersistenceStorageProvider(
                 database = Database.connect(
                     url = "jdbc:mysql://localhost:3306/test",
                     driver = "com.mysql.cj.jdbc.Driver",
@@ -151,17 +158,18 @@ class SQLPersistenceProvidersTest {
         )
     }
 
-    private fun createTestCheckpoint(id: String): AgentCheckpointData {
+    private fun createTestCheckpoint(id: String, version: Long): AgentCheckpointData {
         return AgentCheckpointData(
             checkpointId = id,
             createdAt = Clock.System.now(),
-            nodeId = "test-node",
-            lastInput = JsonPrimitive("Test input"),
+            nodePath = "test-node",
+            lastOutput = JsonPrimitive("Test input"),
             messageHistory = listOf(
                 Message.System("You are a test assistant", RequestMetaInfo.create(Clock.System)),
                 Message.User("Hello", RequestMetaInfo.create(Clock.System)),
                 Message.Assistant("Hi there!", ResponseMetaInfo.create(Clock.System))
-            )
+            ),
+            version = version
         )
     }
 }

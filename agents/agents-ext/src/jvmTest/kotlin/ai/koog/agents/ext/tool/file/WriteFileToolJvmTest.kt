@@ -1,6 +1,5 @@
 package ai.koog.agents.ext.tool.file
 
-import ai.koog.agents.core.tools.DirectToolCallsEnabler
 import ai.koog.agents.core.tools.ToolException
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
 import ai.koog.agents.ext.tool.file.render.norm
@@ -20,18 +19,17 @@ import kotlin.test.assertTrue
 class WriteFileToolJvmTest {
 
     private val fs = JVMFileSystemProvider.ReadWrite
-    private val enabler = object : DirectToolCallsEnabler {}
     private val tool = WriteFileTool(fs)
 
     @TempDir
     lateinit var tempDir: Path
 
     private suspend fun write(path: Path, content: String): WriteFileTool.Result =
-        tool.execute(WriteFileTool.Args(path.toString(), content), enabler)
+        tool.execute(WriteFileTool.Args(path.toString(), content))
 
     @Test
     fun `descriptor is configured correctly`() {
-        val descriptor = WriteFileTool.descriptor
+        val descriptor = tool.descriptor
         assertEquals("__write_file__", descriptor.name)
         assertTrue(descriptor.description.isNotEmpty())
         assertEquals(listOf("path", "content"), descriptor.requiredParameters.map { it.name })
@@ -68,7 +66,7 @@ class WriteFileToolJvmTest {
             "Written",
             "${p.toAbsolutePath().toString().norm()} (<0.1 KiB, 1 line)"
         ).joinToString("\n")
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
     }
 
     @Test
@@ -86,7 +84,7 @@ class WriteFileToolJvmTest {
             "Written",
             "${p.toAbsolutePath().toString().norm()} (<0.1 KiB, 1 line)"
         ).joinToString("\n")
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
         assertEquals("new content", p.readText())
     }
 
@@ -104,7 +102,7 @@ class WriteFileToolJvmTest {
             "Written",
             "${p.toAbsolutePath().toString().norm()} (<0.1 KiB, 3 lines)"
         ).joinToString("\n")
-        assertEquals(expected, result.toStringDefault())
+        assertEquals(expected, tool.encodeResultToString(result))
         assertTrue(p.exists())
         assertEquals(content, p.readText())
     }

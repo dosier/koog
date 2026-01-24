@@ -1,4 +1,4 @@
-# Koog Demo App
+# Demo Compose App
 
 ## Overview
 This is a simple demo Kotlin Multiplatform app built with Compose Multiplatform that demonstrates the capabilities of Koog, a Kotlin AI agentic framework.
@@ -26,9 +26,23 @@ To run the application on android device/emulator:
 - open project in Android Studio and run imported android run configuration
 
 To build the application bundle:
-- run `./gradlew :app:assembleDebug`
-- find `.apk` file in `app/build/outputs/apk/debug/app-debug.apk`
+- run `./gradlew :androidApp:assembleDebug :androidApp:assembleRelease`
+- find `.apk` file in `androidApp/build/outputs/apk/debug/app-debug.apk`
 
 ### Desktop
-Run the desktop application: `./gradlew :app:run`  
-Run the desktop **hot reload** application: `./gradlew :app:hotRunJvm`
+Run the desktop application: `./gradlew :desktopApp:run`
+
+### iOS
+To run the application on iPhone device/simulator:
+- Open `iosApp/iosApp.xcproject` in Xcode and run standard configuration
+- Or use [Kotlin Multiplatform Mobile plugin](https://plugins.jetbrains.com/plugin/14936-kotlin-multiplatform-mobile) for Android Studio
+
+### Web Distribution
+Build web pack: `./gradlew :webApp:jsBrowserDevelopmentWebpack`
+Deploy a dir `webApp/build/dist/composeWebCompatibility/productionExecutable` to a web server
+
+### JS Browser
+Run the browser application: `./gradlew :webApp:jsBrowserDevelopmentRun --continue`
+
+### Wasm Browser
+Run the browser application: `./gradlew :webApp:wasmJsBrowserDevelopmentRun --continue`

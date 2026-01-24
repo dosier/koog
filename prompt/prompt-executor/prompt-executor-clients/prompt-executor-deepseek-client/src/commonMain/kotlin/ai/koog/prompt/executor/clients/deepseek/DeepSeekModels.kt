@@ -4,6 +4,7 @@ import ai.koog.prompt.executor.clients.LLModelDefinitions
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
+import kotlin.jvm.JvmField
 
 /**
  * Object containing a collection of predefined DeepSeek model configurations.
@@ -25,6 +26,7 @@ public object DeepSeekModels : LLModelDefinitions {
      *
      * @see <a href="https://platform.deepseek.com/api-docs/api/create-chat-completion">Chat Completion API</a>
      */
+    @JvmField
     public val DeepSeekChat: LLModel = LLModel(
         provider = LLMProvider.DeepSeek,
         id = "deepseek-chat",
@@ -35,6 +37,7 @@ public object DeepSeekModels : LLModelDefinitions {
             LLMCapability.ToolChoice,
             LLMCapability.Schema.JSON.Basic,
             LLMCapability.Schema.JSON.Standard,
+            LLMCapability.MultipleChoices,
         ),
         contextLength = 64_000,
         maxOutputTokens = 8_000
@@ -45,6 +48,7 @@ public object DeepSeekModels : LLModelDefinitions {
      *
      * @see <a href="https://platform.deepseek.com/api-docs/api/create-chat-completion">Chat Completion API</a>
      */
+    @JvmField
     public val DeepSeekReasoner: LLModel = LLModel(
         provider = LLMProvider.DeepSeek,
         id = "deepseek-reasoner",
@@ -55,6 +59,7 @@ public object DeepSeekModels : LLModelDefinitions {
             LLMCapability.ToolChoice,
             LLMCapability.Schema.JSON.Basic,
             LLMCapability.Schema.JSON.Standard,
+            LLMCapability.MultipleChoices,
         ),
         contextLength = 64_000,
         maxOutputTokens = 64_000

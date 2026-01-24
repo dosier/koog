@@ -1,13 +1,18 @@
 @file:OptIn(ExperimentalTime::class)
 package ai.koog.prompt.dsl
 
+import ai.koog.agents.annotations.JavaAPI
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.params.LLMParams.Schema
 import ai.koog.prompt.params.LLMParams.ToolChoice
 import kotlin.time.Clock
 import kotlinx.serialization.Serializable
+import kotlin.jvm.JvmField
+import kotlin.jvm.JvmName
 import kotlin.jvm.JvmOverloads
+import kotlin.jvm.JvmStatic
+import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
 
@@ -32,12 +37,26 @@ public data class Prompt @JvmOverloads constructor(
      */
     public companion object {
         /**
+         * Constructs a new `PromptBuilder` instance for creating and configuring a `Prompt`.
+         *
+         * @param id The unique identifier for the prompt.
+         * @param clock The clock used for timestamping or time-related operations. Defaults to `Clock.System` if not provided.
+         * @return A new instance of `PromptBuilder` with the specified ID and clock.
+         */
+        @OptIn(ExperimentalTime::class)
+        @JvmStatic
+        @JvmOverloads
+        @JavaAPI
+        public fun builder(id: String, clock: Clock = Clock.System): PromptBuilder = PromptBuilder(id, clock = clock)
+
+        /**
          * Represents an empty state for a [Prompt] object. This variable is initialized
          * with an empty list for the prompt's options and an empty string as the prompt's message.
          *
          * The `Empty` value can be used as a default or placeholder for scenarios
          * where no meaningful data or prompt has been provided.
          */
+        @JvmField
         public val Empty: Prompt = Prompt(emptyList(), "")
 
         /**
@@ -49,6 +68,7 @@ public data class Prompt @JvmOverloads constructor(
          * @param init The initialization logic applied to the `PromptBuilder`.
          * @return The constructed `Prompt` object.
          */
+        @OptIn(ExperimentalTime::class)
         @JvmOverloads
         public fun build(
             id: String,
@@ -69,6 +89,7 @@ public data class Prompt @JvmOverloads constructor(
          * @param init The initialization block applied to configure the [PromptBuilder].
          * @return A new [Prompt] instance configured with the specified initialization logic.
          */
+        @OptIn(ExperimentalTime::class)
         public fun build(prompt: Prompt, clock: Clock = Clock.System, init: PromptBuilder.() -> Unit): Prompt {
             return PromptBuilder.from(prompt, clock).also(init).build()
         }
@@ -83,6 +104,7 @@ public data class Prompt @JvmOverloads constructor(
      *
      * Useful for tracking the token count of the most recently generated LLM response in the LLM chat flow.
      */
+    @get:JvmName("latestTokenUsage")
     public val latestTokenUsage: Int
         get() = messages
             .lastOrNull { it is Message.Response }
@@ -97,7 +119,8 @@ public data class Prompt @JvmOverloads constructor(
      *
      * If no messages are present, the total time spent is `0`.
      */
-
+    @OptIn(ExperimentalTime::class)
+    @get:JvmName("totalTimeSpent")
     public val totalTimeSpent: Duration
         get() = when {
             messages.isEmpty() -> Duration.ZERO
@@ -142,12 +165,6 @@ public data class Prompt @JvmOverloads constructor(
      * @property user An optional user identifier that can be used for tracking or personalization purposes. This property
      * is mutable to allow updates to the user context.
      *
-     * @property includeThoughts If `true`, requests the model to add reasoning blocks to the response. Defaults to `null`.
-     * When set to `true`, responses may include detailed reasoning steps.
-     * When `false` or `null`, responses are typically shorter and faster.
-     *
-     * @property thinkingBudget Hard cap for reasoning tokens. Ignored by models that don't support budgets.
-     * This can be used to limit the amount of tokens used for reasoning when `includeThoughts` is enabled.
      */
     public class LLMParamsUpdateContext internal constructor(
         public var temperature: Double?,
@@ -155,8 +172,6 @@ public data class Prompt @JvmOverloads constructor(
         public var schema: Schema?,
         public var toolChoice: ToolChoice?,
         public var user: String? = null,
-        public var includeThoughts: Boolean? = null,
-        public var thinkingBudget: Int? = null,
     ) {
         /**
          * Secondary constructor for `LLMParamsUpdateContext` that initializes the context using an
@@ -171,8 +186,6 @@ public data class Prompt @JvmOverloads constructor(
             params.schema,
             params.toolChoice,
             params.user,
-            params.includeThoughts,
-            params.thinkingBudget
         )
 
         /**
@@ -186,9 +199,21 @@ public data class Prompt @JvmOverloads constructor(
             speculation = speculation,
             schema = schema,
             toolChoice = toolChoice,
+            user = user
+        )
+
+        /**
+         * Updates the given [LLMParams] instance with the current context's configuration.
+         *
+         * @param params The original instance of [LLMParams] to which the updates are applied.
+         * @return A new instance of [LLMParams] with updated values.
+         */
+        internal fun applyToParams(params: LLMParams): LLMParams = params.copy(
+            temperature = temperature,
+            speculation = speculation,
+            schema = schema,
+            toolChoice = toolChoice,
             user = user,
-            includeThoughts = includeThoughts,
-            thinkingBudget = thinkingBudget
         )
     }
 
@@ -203,5 +228,5 @@ public data class Prompt @JvmOverloads constructor(
      * @return A new `Prompt` instance with the updated parameters.
      */
     public fun withUpdatedParams(update: LLMParamsUpdateContext.() -> Unit): Prompt =
-        copy(params = LLMParamsUpdateContext(params).apply { update() }.toParams())
+        copy(params = LLMParamsUpdateContext(params).apply { update() }.applyToParams(params))
 }

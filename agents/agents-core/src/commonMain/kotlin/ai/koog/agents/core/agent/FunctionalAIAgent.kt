@@ -1,27 +1,24 @@
-@file:OptIn(ExperimentalUuidApi::class)
-
 package ai.koog.agents.core.agent
 
 import ai.koog.agents.core.agent.config.AIAgentConfig
+import ai.koog.agents.core.agent.context.AIAgentFunctionalContext
 import ai.koog.agents.core.agent.context.AIAgentLLMContext
-import ai.koog.agents.core.agent.context.element.AgentRunInfoContextElement
 import ai.koog.agents.core.agent.entity.AIAgentStateManager
 import ai.koog.agents.core.agent.entity.AIAgentStorage
+import ai.koog.agents.core.agent.execution.AgentExecutionInfo
+import ai.koog.agents.core.annotation.InternalAgentsApi
+import ai.koog.agents.core.environment.AIAgentEnvironment
+import ai.koog.agents.core.environment.ContextualAgentEnvironment
 import ai.koog.agents.core.environment.GenericAgentEnvironment
 import ai.koog.agents.core.feature.AIAgentFeature
-import ai.koog.agents.core.feature.AIAgentNonGraphFeature
-import ai.koog.agents.core.feature.AIAgentNonGraphPipeline
-import ai.koog.agents.core.feature.PromptExecutorProxy
+import ai.koog.agents.core.feature.AIAgentFunctionalFeature
+import ai.koog.agents.core.feature.ContextualPromptExecutor
 import ai.koog.agents.core.feature.config.FeatureConfig
+import ai.koog.agents.core.feature.pipeline.AIAgentFunctionalPipeline
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.prompt.executor.model.PromptExecutor
 import io.github.oshai.kotlinlogging.KotlinLogging
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlin.time.Clock
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 
 /**
  * Represents the core AI agent for processing input and generating output using
@@ -29,36 +26,34 @@ import kotlin.uuid.Uuid
  *
  * @param Input The type of input data expected by the agent.
  * @param Output The type of output data produced by the agent.
- * @param id The unique identifier for the agent instance.
- * @param promptExecutor The executor responsible for processing prompts and interacting with language models.
- * @param agentConfig The configuration for the agent, including the prompt structure and execution parameters.
- * @param toolRegistry The registry of tools available for the agent. Defaults to an empty registry if not specified.
+ * @property id The unique identifier for the agent instance.
+ * @property promptExecutor The executor responsible for processing prompts and interacting with language models.
+ * @property agentConfig The configuration for the agent, including the prompt structure and execution parameters.
+ * @property strategy The strategy for processing input and generating output.
+ * @property toolRegistry The registry of tools available for the agent. Defaults to an empty registry if not specified.
+ * @property clock The clock used to calculate message timestamps
+ * @param id Unique identifier for the agent. Random UUID will be generated if set to null.
+ * @property installFeatures Lambda for installing additional features within the agent environment.
  */
+@OptIn(InternalAgentsApi::class)
 public class FunctionalAIAgent<Input, Output>(
     public val promptExecutor: PromptExecutor,
     override val agentConfig: AIAgentConfig,
+    override val strategy: AIAgentFunctionalStrategy<Input, Output>,
     public val toolRegistry: ToolRegistry = ToolRegistry.EMPTY,
-    public val strategy: AIAgentFunctionalStrategy<Input, Output>,
     id: String? = null,
     public val clock: Clock = Clock.System,
-    featureContext: FeatureContext.() -> Unit = {}
-) : AIAgent<Input, Output> {
-
+    @property:InternalAgentsApi
+    public val installFeatures: FeatureContext.() -> Unit = {}
+) : StatefulSingleUseAIAgent<Input, Output, AIAgentFunctionalContext>(
+    logger = logger,
+    id = id,
+) {
     private companion object {
         private val logger = KotlinLogging.logger {}
     }
 
-    override val id: String by lazy { id ?: Uuid.random().toString() }
-
-    private val pipeline = AIAgentNonGraphPipeline(clock)
-
-    private val environment = GenericAgentEnvironment(
-        this@FunctionalAIAgent.id,
-        strategy.name,
-        logger,
-        toolRegistry,
-        pipeline = pipeline
-    )
+    override val pipeline: AIAgentFunctionalPipeline = AIAgentFunctionalPipeline(agentConfig, clock)
 
     /**
      * Represents a context for managing and configuring features in an AI agent.
@@ -72,87 +67,91 @@ public class FunctionalAIAgent<Input, Output>(
          * @param configure an optional lambda to customize the configuration of the feature, where the provided [Config] can be modified
          */
         public fun <Config : FeatureConfig, Feature : Any> install(
-            feature: AIAgentNonGraphFeature<Config, Feature>,
+            feature: AIAgentFunctionalFeature<Config, Feature>,
             configure: Config.() -> Unit = {}
         ) {
-            agent.install(feature, configure)
+            agent.pipeline.install(feature, configure)
         }
-    }
-
-    private var isRunning = false
-
-    private val runningMutex = Mutex()
-
-    private fun <Config : FeatureConfig, Feature : Any> install(
-        feature: AIAgentNonGraphFeature<Config, Feature>,
-        configure: Config.() -> Unit
-    ) {
-        pipeline.install(feature, configure)
     }
 
     init {
-        FeatureContext(this).featureContext()
+        FeatureContext(this).installFeatures()
     }
 
-    override suspend fun run(agentInput: Input): Output {
-        runningMutex.withLock {
-            if (isRunning) {
-                throw IllegalStateException("Agent is already running")
-            }
-            isRunning = true
-        }
+    override suspend fun prepareContext(agentInput: Input, runId: String, eventId: String): AIAgentFunctionalContext {
+        val environment = GenericAgentEnvironment(
+            agentId = id,
+            logger = logger,
+            toolRegistry = toolRegistry,
+        )
 
-        pipeline.prepareFeatures()
-        val runId = Uuid.random().toString()
-
-        val llm = AIAgentLLMContext(
+        val initialLLMContext = AIAgentLLMContext(
             tools = toolRegistry.tools.map { it.descriptor },
             toolRegistry = toolRegistry,
             prompt = agentConfig.prompt,
             model = agentConfig.model,
-            promptExecutor = PromptExecutorProxy(
-                executor = promptExecutor,
-                pipeline = pipeline,
-                runId = runId
-            ),
+            responseProcessor = agentConfig.responseProcessor,
+            promptExecutor = promptExecutor,
             environment = environment,
             config = agentConfig,
             clock = clock
         )
 
-        val context = AIAgentFunctionalContext(
-            environment,
-            this@FunctionalAIAgent.id,
-            runId,
-            agentInput,
-            agentConfig,
-            llm,
-            AIAgentStateManager(),
+        val executionInfo = AgentExecutionInfo(parent = null, partName = id)
+        val preparedEnvironment = prepareEnvironment()
+
+        // Context
+        val initialAgentContext = AIAgentFunctionalContext(
+            environment = preparedEnvironment,
+            agentId = id,
+            runId = runId,
+            agentInput = agentInput,
+            config = agentConfig,
+            llm = initialLLMContext,
+            stateManager = AIAgentStateManager(),
             storage = AIAgentStorage(),
             strategyName = strategy.name,
-            pipeline = pipeline
+            pipeline = pipeline,
+            executionInfo = executionInfo,
+            parentContext = null
         )
 
-        val result = withContext(
-            AgentRunInfoContextElement(
-                agentId = this@FunctionalAIAgent.id,
-                runId = runId,
-                agentConfig = agentConfig,
-                strategyName = strategy.name
-            )
-        ) {
-            strategy.execute(context, agentInput)
-        }
+        // Updated environment
+        val contextualEnvironment = ContextualAgentEnvironment(
+            environment = preparedEnvironment,
+            context = initialAgentContext,
+        )
 
-        runningMutex.withLock {
-            isRunning = false
-        }
+        val contextualPromptExecutor = ContextualPromptExecutor(
+            executor = promptExecutor,
+            context = initialAgentContext,
+        )
 
-        return result
+        val updatedLLMContext = initialAgentContext.llm.copy(
+            environment = contextualEnvironment,
+            promptExecutor = contextualPromptExecutor,
+        )
+
+        val updatedAgentContext = initialAgentContext.copy(
+            llm = updatedLLMContext,
+            environment = contextualEnvironment,
+            parentRootContext = initialAgentContext.parentContext, // Keep the original parent context
+        )
+
+        return updatedAgentContext
     }
 
-    override suspend fun close() {
-        pipeline.onAgentBeforeClosed(agentId = this@FunctionalAIAgent.id)
-        pipeline.closeFeaturesStreamProviders()
+    //region Private Methods
+
+    private fun prepareEnvironment(): AIAgentEnvironment {
+        val baseEnvironment = GenericAgentEnvironment(
+            agentId = id,
+            logger = logger,
+            toolRegistry = toolRegistry,
+        )
+
+        return baseEnvironment
     }
+
+    //endregion Private Methods
 }

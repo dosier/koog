@@ -3,7 +3,6 @@ package ai.koog.agents.core.agent
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.features.eventHandler.feature.EventHandler
 import ai.koog.agents.testing.tools.getMockExecutor
-import ai.koog.agents.testing.tools.mockLLMAnswer
 import ai.koog.prompt.llm.OllamaModels
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -26,13 +25,13 @@ class SingleRunStrategyTests {
             mockLLMAnswer("I don't know how to answer that.").asDefaultResponse
         }
 
-        val agent = AIAgent(
+        val agent = AIAgent.invoke(
             mockLLMApi,
             OllamaModels.Meta.LLAMA_3_2,
             toolRegistry = testToolRegistry
         ) {
             install(EventHandler) {
-                onToolCall { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
+                onToolCallStarting { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
             }
         }
 
@@ -63,7 +62,7 @@ class SingleRunStrategyTests {
             toolRegistry = testToolRegistry
         ) {
             install(EventHandler) {
-                onToolCall { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
+                onToolCallStarting { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
             }
         }
 
@@ -93,7 +92,7 @@ class SingleRunStrategyTests {
             toolRegistry = testToolRegistry
         ) {
             install(EventHandler) {
-                onToolCall { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
+                onToolCallStarting { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
             }
         }
 
@@ -123,7 +122,7 @@ class SingleRunStrategyTests {
             toolRegistry = testToolRegistry
         ) {
             install(EventHandler) {
-                onToolCall { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
+                onToolCallStarting { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
             }
         }
 
@@ -162,7 +161,7 @@ class SingleRunStrategyTests {
             toolRegistry = testToolRegistry
         ) {
             install(EventHandler) {
-                onToolCall { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
+                onToolCallStarting { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
             }
         }
 
@@ -201,7 +200,7 @@ class SingleRunStrategyTests {
             toolRegistry = testToolRegistry
         ) {
             install(EventHandler) {
-                onToolCall { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
+                onToolCallStarting { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
             }
         }
 
@@ -241,7 +240,7 @@ class SingleRunStrategyTests {
             toolRegistry = testToolRegistry
         ) {
             install(EventHandler) {
-                onToolCall { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
+                onToolCallStarting { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
             }
         }
 
@@ -281,7 +280,7 @@ class SingleRunStrategyTests {
             toolRegistry = testToolRegistry
         ) {
             install(EventHandler) {
-                onToolCall { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
+                onToolCallStarting { eventContext -> actualToolCalls += eventContext.toolArgs.toString() }
             }
         }
 

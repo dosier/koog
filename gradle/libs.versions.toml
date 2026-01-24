@@ -1,46 +1,54 @@
 [versions]
-agp = "8.11.1"
-annotations = "26.0.2"
-assertj = "3.27.4"
-aws-sdk-kotlin = "1.5.16"
-dokka = "2.0.0"
+acp = "0.13.1"
+agp = "8.12.3"
+annotations = "26.0.2-1"
+assertj = "3.27.6"
+awaitility = "4.3.0"
+aws-sdk-kotlin = "1.5.123"
+dokka = "2.1.0"
+exposed = "0.61.0"
+h2 = "2.4.240"
+hikaricp = "6.2.1"
+jdkVersion = "17"
 jetsign = "45.47"
 junit = "5.13.4"
 knit = "0.5.0"
-kotlin = "2.2.10"
+kotest = "6.0.7"
+kotlin = "2.3.0"
 kotlinx-coroutines = "1.10.2"
 kotlinx-datetime = "0.7.1"
-kotlinx-io = "0.8.0"
-kotlinx-serialization = "1.9.0" # check with IJ
-kover = "0.9.2"
-ktlint = "13.1.0"
-ktor3 = "3.2.3"
+kotlinx-io = "0.8.2"
+kotlinx-serialization = "1.9.0"
+kover = "0.9.4"
+ktlint = "14.0.1"
+ktor3 = "3.3.3"
 lettuce = "6.5.5.RELEASE"
 logback = "1.5.18"
-mcp = "0.7.0"
-mockito = "5.19.0"
-mockk = "1.13.8"
-netty = "4.2.6.Final"
-opentelemetry = "1.51.0"
-oshai-logging = "7.0.7"
-shadow = "8.1.1"
-slf4j = "2.0.17"
-testcontainers = "1.19.7"
-exposed = "0.58.0"
-hikaricp = "6.2.1"
-postgresql = "42.7.4"
+mcp = "0.8.1"
+mockito = "5.21.0"
+mockk = "1.14.7"
+mokksy = "0.5.1"
 mysql = "8.0.33"
-h2 = "2.2.224"
-sqlite = "3.46.1.3"
-spring-boot = "3.5.3"
+netty = "4.2.9.Final"
+okhttp = "5.3.2"
+opentelemetry = "1.51.0"
+oshai-logging = "7.0.14"
+postgresql = "42.7.4"
+slf4j = "2.0.17"
+spring-boot = "3.5.9"
 spring-management = "1.1.7"
+sqlite = "3.51.1.0"
+testcontainers = "1.21.4"
 
 [libraries]
 jetbrains-annotations = { module = "org.jetbrains:annotations", version.ref = "annotations" }
 mockito-junit-jupiter = { module = "org.mockito:mockito-junit-jupiter", version.ref = "mockito" }
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+awaitility = { module = "org.awaitility:awaitility-kotlin", version.ref = "awaitility" }
 junit-jupiter-params = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "junit" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
+kotest-assertions-json = { module = "io.kotest:kotest-assertions-json", version.ref = "kotest" }
 kotlin-bom = { module = "org.jetbrains.kotlin:kotlin-bom", version.ref = "kotlin" }
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
@@ -55,25 +63,28 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor3" }
 ktor-client-js = { module = "io.ktor:ktor-client-js", version.ref = "ktor3" }
 ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor3" }
-ktor-client-winhttp = { module = "io.ktor:ktor-client-winhttp", version.ref = "ktor3" }
-ktor-client-curl = { module = "io.ktor:ktor-client-curl", version.ref = "ktor3" }
-ktor-bom = { module = "io.ktor:ktor-bom", version.ref = "ktor3" }
 ktor-client-apache5 = { module = "io.ktor:ktor-client-apache5", version.ref = "ktor3" }
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor3" }
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor3" }
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor3" }
 ktor-client-logging = { module = "io.ktor:ktor-client-logging", version.ref = "ktor3" }
-ktor-client-sse = { module = "io.ktor:ktor-server-sse", version.ref = "ktor3" }
 ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor3" }
+ktor-client-sse = { module = "io.ktor:ktor-client-sse", version.ref = "ktor3" }
 ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor3" }
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor3" }
 ktor-server-cio = { module = "io.ktor:ktor-server-cio", version.ref = "ktor3" }
 ktor-server-netty = { module = "io.ktor:ktor-server-netty-jvm", version.ref = "ktor3" }
 ktor-server-sse = { module = "io.ktor:ktor-server-sse", version.ref = "ktor3" }
+ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor3" }
+ktor-server-cors = { module = "io.ktor:ktor-server-cors", version.ref = "ktor3" }
+ktor-server-test-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor3" }
 lettuce-core = { module = "io.lettuce:lettuce-core", version.ref = "lettuce" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 oshai-kotlin-logging = { module = "io.github.oshai:kotlin-logging", version.ref = "oshai-logging" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+mokksy-a2a = { module = "me.kpavlov.aimocks:ai-mocks-a2a", version.ref = "mokksy" }
 dokka-gradle-plugin = { module = "org.jetbrains.dokka:dokka-gradle-plugin", version.ref = "dokka" }
+acp = { module = "com.agentclientprotocol:acp", version.ref = "acp"}
 mcp-client = { module = "io.modelcontextprotocol:kotlin-sdk-client", version.ref = "mcp" }
 mcp-server = { module = "io.modelcontextprotocol:kotlin-sdk-server", version.ref = "mcp" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
@@ -91,6 +102,9 @@ postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" 
 mysql = { module = "com.mysql:mysql-connector-j", version.ref = "mysql" }
 h2 = { module = "com.h2database:h2", version.ref = "h2" }
 sqlite = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
+okhttp-bom = { module = "com.squareup.okhttp3:okhttp-bom", version.ref = "okhttp" }
+okhttp = { module = "com.squareup.okhttp3:okhttp" }
+okhttp-sse = { module = "com.squareup.okhttp3:okhttp-sse" }
 opentelemetry-bom = { module = "io.opentelemetry:opentelemetry-bom", version.ref = "opentelemetry" }
 opentelemetry-sdk = { module = "io.opentelemetry:opentelemetry-sdk" }
 opentelemetry-exporter-otlp = { module = "io.opentelemetry:opentelemetry-exporter-otlp" }
@@ -116,12 +130,9 @@ spring-boot-core = [
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-android-library = { id = "com.android.library", version.ref = "agp" }
 knit = { id = "org.jetbrains.kotlinx.knit", version.ref = "knit" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 kotlin-spring = { id = "org.jetbrains.kotlin.plugin.spring", version.ref = "kotlin" }
 kotlinx-kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
-shadow = { id = "com.github.johnrengelman.shadow", version.ref = "shadow" }
 spring-management = { id = "io.spring.dependency-management", version.ref = "spring-management" }

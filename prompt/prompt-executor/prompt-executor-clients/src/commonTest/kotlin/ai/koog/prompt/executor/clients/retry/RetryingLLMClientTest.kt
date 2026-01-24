@@ -5,10 +5,10 @@ import ai.koog.prompt.dsl.ModerationResult
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.clients.LLMClient
-import ai.koog.prompt.executor.model.LLMChoice
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.streaming.StreamFrame
@@ -26,6 +26,7 @@ import kotlin.time.Clock
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
 import kotlin.time.Duration.Companion.milliseconds
 
 class RetryingLLMClientTest {
@@ -63,6 +64,28 @@ class RetryingLLMClientTest {
 
         assertEquals(testResponse, result)
         assertEquals(1, mockClient.executeCalls)
+    }
+
+    @Test
+    fun testConvertLLMClientToRetryingClientWithDefaultConfig() = runTest {
+        val mockClient = MockLLMClient()
+        // when
+        val retryingClient = mockClient.toRetryingClient()
+
+        // then
+        assertSame(actual = retryingClient.config, expected = RetryConfig.DEFAULT)
+    }
+
+    @Test
+    fun testConvertLLMClientToRetryingClientWithCustomConfig() = runTest {
+        // given
+        val mockClient = MockLLMClient()
+        val retryConfig = RetryConfig(maxAttempts = 100500)
+        // when
+        val retryingClient = mockClient.toRetryingClient(retryConfig)
+
+        // then
+        assertSame(actual = retryingClient.config, expected = retryConfig)
     }
 
     @Test
@@ -370,7 +393,8 @@ class RetryingLLMClientTest {
         private var failuresBeforeSuccess: Int = 0,
         private var streamFailuresBeforeSuccess: Int = 0,
         private val failureMessage: String = "Mock failure",
-        private val throwCancellation: Boolean = false
+        private val throwCancellation: Boolean = false,
+        private val llmProvider: LLMProvider = LLMProvider.OpenAI,
     ) : LLMClient {
 
         var executeCalls = 0
@@ -382,6 +406,8 @@ class RetryingLLMClientTest {
         private var streamFailures = 0
         private var multipleChoicesFailures = 0
         private var moderateFailures = 0
+
+        override fun llmProvider(): LLMProvider = llmProvider
 
         override suspend fun execute(
             prompt: Prompt,
@@ -441,6 +467,10 @@ class RetryingLLMClientTest {
             }
 
             return moderateResponse
+        }
+
+        override fun close() {
+            // No resources to close
         }
     }
 }

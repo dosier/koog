@@ -13,6 +13,8 @@ kotlin {
                 api(kotlin("test"))
                 api(libs.kotlinx.coroutines.test)
                 api(libs.kotlinx.serialization.json)
+                api(libs.kotest.assertions.json)
+                api(libs.kotest.assertions.core)
             }
         }
 
@@ -20,6 +22,8 @@ kotlin {
             dependencies {
                 api(kotlin("test-junit5"))
                 api(libs.junit.jupiter.params)
+                api(libs.testcontainers)
+                api(libs.awaitility)
                 runtimeOnly(libs.slf4j.simple)
             }
         }

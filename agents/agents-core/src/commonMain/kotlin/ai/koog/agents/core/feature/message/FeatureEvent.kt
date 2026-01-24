@@ -11,10 +11,7 @@ package ai.koog.agents.core.feature.message
 public interface FeatureEvent : FeatureMessage {
 
     /**
-     * Represents a unique identifier for a feature-related event.
-     *
-     * This identifier is used to distinguish and track individual events in the system,
-     * enabling a clear correlation between logged events or processed messages.
+     * Represents a unique identifier for the event or a group of events.
      */
     public val eventId: String
 }

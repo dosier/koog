@@ -271,7 +271,7 @@ val strategy = strategy<String, String>("strategy_name") {
 ```kotlin
 val summarizeTextNode by node<String, String>("node_name") { input ->
     llm.writeSession {
-        updatePrompt {
+        appendPrompt {
             user("Please summarize the following text: $input")
         }
 
@@ -286,7 +286,6 @@ val summarizeTextNode by node<String, String>("node_name") { input ->
 
 <!--- INCLUDE
 import ai.koog.agents.core.dsl.builder.strategy
-import ai.koog.agents.core.environment.executeTool
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import kotlin.time.Clock

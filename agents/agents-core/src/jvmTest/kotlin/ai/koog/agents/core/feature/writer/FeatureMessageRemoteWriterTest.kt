@@ -7,7 +7,7 @@ import ai.koog.agents.core.feature.remote.client.config.DefaultClientConnectionC
 import ai.koog.agents.core.feature.remote.server.config.DefaultServerConnectionConfig
 import ai.koog.agents.core.feature.remote.server.config.ServerConnectionConfig
 import ai.koog.agents.testing.network.NetUtil.findAvailablePort
-import ai.koog.agents.utils.use
+import ai.koog.utils.io.use
 import io.github.oshai.kotlinlogging.KLogger
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.http.URLProtocol
@@ -61,7 +61,7 @@ class FeatureMessageRemoteWriterTest {
 
         val writer = TestFeatureMessageRemoteWriter(serverConfig)
         val throwable = assertThrows<IllegalStateException> {
-            writer.processMessage(FeatureStringMessage("test message"))
+            writer.onMessage(FeatureStringMessage("test message"))
         }
 
         val expectedError = "Writer is not initialized. Please make sure you call method 'initialize()' before."
@@ -161,7 +161,7 @@ class FeatureMessageRemoteWriterTest {
                 writer.initialize()
                 isServerStarted.complete(true)
 
-                writer.processMessage(testServerMessage)
+                writer.onMessage(testServerMessage)
 
                 isClientFinished.await()
                 logger.info { "Server is finished successfully" }
@@ -230,7 +230,7 @@ class FeatureMessageRemoteWriterTest {
                 writer.initialize()
                 isServerStarted.complete(true)
 
-                writer.processMessage(message = testServerMessage)
+                writer.onMessage(message = testServerMessage)
 
                 isClientFinished.await()
                 logger.info { "Server is finished successfully" }
@@ -254,7 +254,7 @@ class FeatureMessageRemoteWriterTest {
                 assertNotNull(actualEventMessage) {
                     "Client received a server SSE message, but it is not a string message"
                 }
-                assertEquals(testServerMessage.eventId, actualEventMessage.eventId)
+                assertEquals(testServerMessage.testMessage, actualEventMessage.testMessage)
 
                 logger.info { "Client is finished successfully" }
             }

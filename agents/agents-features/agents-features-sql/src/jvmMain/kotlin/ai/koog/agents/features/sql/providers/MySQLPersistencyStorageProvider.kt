@@ -1,12 +1,14 @@
 package ai.koog.agents.features.sql.providers
 
+import ai.koog.agents.snapshot.providers.PersistenceUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.jetbrains.exposed.sql.transactions.transaction
 
 /**
- * MySQL-specific implementation of [ExposedPersistencyStorageProvider] for managing
+ * MySQL-specific implementation of [ExposedPersistenceStorageProvider] for managing
  * agent checkpoints in MySQL databases.
  *
  * This provider is optimized for MySQL 5.7+ and MariaDB 10.2+, leveraging their
@@ -20,7 +22,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
  *
  * ## Example Usage:
  * ```kotlin
- * val provider = MySQLPersistencyStorageProvider(
+ * val provider = MySQLPersistenceStorageProvider(
  *     persistenceId = "my-agent",
  *     database = Database.connect(
  *         url = "jdbc:mysql://localhost:3306/mydb?useSSL=false&serverTimezone=UTC",
@@ -34,13 +36,13 @@ import org.jetbrains.exposed.sql.transactions.transaction
  *
  * @constructor Initializes the MySQL persistence provider with an Exposed Database instance.
  */
-public class MySQLPersistencyStorageProvider(
-    persistenceId: String,
+public class MySQLPersistenceStorageProvider(
     database: Database,
     tableName: String = "agent_checkpoints",
     ttlSeconds: Long? = null,
-    migrator: SQLPersistenceSchemaMigrator = MySqlPersistenceSchemaMigrator(database, tableName)
-) : ExposedPersistencyStorageProvider(persistenceId, database, tableName, ttlSeconds, migrator) {
+    migrator: SQLPersistenceSchemaMigrator = MySqlPersistenceSchemaMigrator(database, tableName),
+    json: Json = PersistenceUtils.defaultCheckpointJson
+) : ExposedPersistenceStorageProvider(database, tableName, ttlSeconds, migrator, json) {
 
     override suspend fun <T> transaction(block: suspend () -> T): T =
         newSuspendedTransaction(Dispatchers.IO, database) {
@@ -74,10 +76,12 @@ public class MySqlPersistenceSchemaMigrator(private val database: Database, priv
                 created_at BIGINT NOT NULL,
                 checkpoint_json JSON NOT NULL,
                 ttl_timestamp BIGINT NULL,
+                version BIGINT NOT NULL,
                 
                 PRIMARY KEY (persistence_id, checkpoint_id),
                 INDEX idx_${tableName}_created_at (created_at),
-                INDEX idx_${tableName}_ttl_timestamp (ttl_timestamp)
+                INDEX idx_${tableName}_ttl_timestamp (ttl_timestamp),
+                UNIQUE INDEX uniq_${tableName}_persistence_id_version (persistence_id, version)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """.trimIndent()
             )

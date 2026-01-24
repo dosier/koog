@@ -17,7 +17,7 @@ This document describes how to use and implement custom features for AIAgent.
     - [Pipeline Interceptors](#pipeline-interceptors)
     - [Advanced Interceptors](#advanced-interceptors)
 - [Available Features](#available-features)
-    - [AgentMemory](#agentmemory)
+    - [Debugger](#debugger)
 
 ## Introduction
 
@@ -62,6 +62,91 @@ val agent = AIAgent(
 }
 ```
 
+## Filtering agent events with setEventFilter
+
+In addition to per-processor message filtering, you can filter which agent events a feature will handle using FeatureConfig.setEventFilter. This filter works for any feature and is evaluated before events are passed to any FeatureMessageProcessor.
+
+Key points:
+- The predicate receives an EventHandlerContext and must return true to let the event be handled; false will skip it.
+- EventHandlerContext exposes eventType and has useful subtypes you can match on (e.g., LLMEventHandlerContext, NodeEventHandlerContext, ToolEventHandlerContext, StrategyEventHandlerContext).
+- If you do not set a filter, all events are allowed (default behavior).
+- You can change the filter at runtime by calling setEventFilter again; the new predicate is applied to subsequent events.
+- This event-level filter composes with per-processor setMessageFilter. Both must allow the item for it to be processed and emitted.
+
+### Disabling event filtering for a feature
+
+Some features rely on receiving the complete sequence of agent lifecycle events to function correctly. For such features, the `setEventFilter` method can be overridden in the feature's configuration class to prevent event filtering.
+
+To disable event filtering for a custom feature:
+
+```kotlin
+class MyFeatureConfig : FeatureConfig() {
+    override fun setEventFilter(filter: (AgentLifecycleEventContext) -> Boolean) {
+        // Log a warning and ignore the filter
+        logger.warn { "Events filtering is not allowed for MyFeature." }
+        // Always allow all events
+        super.setEventFilter { true }
+    }
+}
+```
+
+This pattern is used by features like OpenTelemetry and Debugger, which depend on the execution flow and event hierarchy to produce correct spans and debugging information.
+
+Example: allow only LLM call start/end events for a feature
+```kotlin
+install(TraceFeature) {
+    setEventFilter { context ->
+        context.eventType is AgentEventType.BeforeLLMCall ||
+            context.eventType is AgentEventType.AfterLLMCall
+    }
+}
+```
+
+Equivalent using context type checks
+```kotlin
+
+install(TraceFeature) {
+    setEventFilter { context -> context is LLMEventHandlerContext }
+}
+```
+
+Example: filter node-related events by node name
+```kotlin
+
+install(MyFeature) {
+    setEventFilter { context ->
+        when (context) {
+            is NodeBeforeExecuteContext -> context.node.name == "Summarize"
+            is NodeAfterExecuteContext -> context.node.name == "Summarize"
+            is NodeExecutionErrorContext -> context.node.name == "Summarize"
+            else -> true // allow all other event types
+        }
+    }
+}
+```
+
+Example: combine setEventFilter with per-processor setMessageFilter
+```kotlin
+val logWriter = MyFeatureMessageLogWriter(targetLogger = KotlinLogger.logger("my.feature.logger")).apply {
+    initialize()
+    setMessageFilter { message ->
+        // Only log AfterLLMCall messages
+        message is LLMCallCompletedEvent
+    }
+}
+
+install(TraceFeature) {
+    // Only allow LLM events for this feature instance
+    setEventFilter { context -> 
+        context.eventType is AgentEventType.BeforeLLMCall || 
+            context.eventType is AgentEventType.AfterLLMCall 
+    }
+
+    // Then add a processor with its own, more granular, message filter
+    addMessageProcessor(logWriter)
+}
+```
+
 ### Using FeatureMessageProcessor
 
 You can provide a list of `FeatureMessageProcessor` implementations when configuring a feature. These processors can be accessed by the feature configuration. A configuration class should inherit from `FeatureConfig` class to get access to the `messageProcessor` property:
@@ -87,6 +172,35 @@ install(TraceFeature) {
 ```
 
 The `FeatureMessageProcessor` class contains methods for initialization of a concrete processor instance and properly closing it when finished.
+
+#### Filtering messages with setMessageFilter
+
+Every `FeatureMessageProcessor` now supports message filtering via `setMessageFilter`. By default, all messages are processed. You can supply a predicate to process only specific messages. The filter is evaluated for each incoming `FeatureMessage` before it is passed to the processor.
+
+Example: only process LLM call start/end events
+```kotlin
+myFeatureMessageProcessor.setMessageFilter { message ->
+    message is LLMCallStartingEvent ||
+    message is LLMCallCompletedEvent
+}
+```
+
+You can use the same approach with any concrete processor implementation (e.g., `FeatureMessageLogWriter`, `FeatureMessageFileWriter`, or `FeatureMessageRemoteWriter`):
+```kotlin
+val logWriter = MyFeatureMessageLogWriter(targetLogger = KotlinLogger.logger("my.feature.logger"))
+logWriter.initialize()
+logWriter.setMessageFilter { message -> 
+    message is LLMCallCompletedEvent && message.content.contains("keyword")
+}
+
+install(MyFeature) {
+    addMessageProcessor(logWriter)
+}
+```
+
+Notes:
+- If you do not set a filter, all messages are processed (default behavior).
+- You can change the filter at runtime by calling `setMessageFilter` again; the new predicate will be applied to subsequent messages.
 
 ### Using FeatureMessageFileWriter
 
@@ -301,71 +415,90 @@ Features can intercept various points in the agent execution pipeline:
    }
    ```
 
-2. **Context Stage Feature Interception**: Customize how features are provided to stage contexts
+2. **Context Agent Feature Interception**: Customize how features are provided to agent contexts
    ```kotlin
-   pipeline.interceptContextStageFeature(MyFeature) { stageContext ->
-       // Inspect stage context and return a feature instance
-       MyFeature(customizedForStage = stageContext.stageName)
+   pipeline.interceptContextAgentFeature(MyFeature) { agentContext ->
+       // Inspect agent context and return a feature instance
+       MyFeature(customizedForStage = agentContext.stageName)
    }
    ```
 
-3. **Before Agent Started Interception**: Modify or enhance the agent during creation
+3. **Agent Starting Interception**: Execute code when an agent starts
    ```kotlin
-   pipeline.interceptBeforeAgentStarted(this, feature) {
-       readStages { stages ->
-           // Inspect agent stages
-       }
+   val interceptContext = InterceptContext(this, feature)
+   pipeline.interceptAgentStarting(interceptContext) { event ->
+       // Access agent, runId, context, or feature
+       // event.agent, event.runId, event.context, event.feature
    }
    ```
 
-4. **Strategy Started Interception**: Execute code when a strategy starts
+4. **Strategy Starting Interception**: Execute code when a strategy starts
    ```kotlin
-   pipeline.interceptStrategyStarted(this, feature) {
-       readStages { stages ->
-           // Inspect agent stages when strategy starts
-       }
+   pipeline.interceptStrategyStarting(interceptContext) { event ->
+       // Inspect agent or context when strategy starts
    }
    ```
 
 5. **Before Node Execution**: Execute code before a node runs
    ```kotlin
-   pipeline.interceptBeforeNode(this, feature) { node, context, input ->
-       logger.info("Node ${node.name} is about to execute with input: $input")
+   pipeline.interceptNodeExecutionStarting(interceptContext) { event ->
+       logger.info("Node ${event.node.name} is about to execute with input: ${event.input}")
    }
    ```
 
 6. **After Node Execution**: Execute code after a node completes
    ```kotlin
-   pipeline.interceptAfterNode(this, feature) { node, context, input, output ->
-       logger.info("Node ${node.name} executed with input: $input and produced output: $output")
+   pipeline.interceptNodeExecutionCompleted(interceptContext) { event ->
+       logger.info("Node ${event.node.name} executed with input: ${event.input} and produced output: ${event.output}")
    }
    ```
 
-7. **Before LLM Call**: Execute code before a call to the language model
+7. **LLM Call Starting**: Execute code before a call to the language model
    ```kotlin
-   pipeline.interceptBeforeLLMCall(this, feature) { prompt ->
-       logger.info("About to make LLM call with prompt: ${prompt.messages.last().content}")
+   pipeline.interceptLLMCallStarting(interceptContext) { eventContext ->
+       logger.info("About to make LLM call with prompt: ${eventContext.prompt.messages.last().content}")
    }
    ```
 
-8. **Before LLM Call With Tools**: Execute code before a call to the language model with tools
+8. **LLM Call Starting (with tools)**: Tools are available via the event context
    ```kotlin
-   pipeline.interceptBeforeLLMCallWithTools(this, feature) { prompt, tools ->
-       logger.info("About to make LLM call with ${tools.size} tools")
+   pipeline.interceptLLMCallStarting(interceptContext) { eventContext ->
+       logger.info("About to make LLM call with ${eventContext.tools.size} tools")
    }
    ```
 
-9. **After LLM Call**: Execute code after a call to the language model
+9. **LLM Call Completed**: Execute code after a call to the language model
    ```kotlin
-   pipeline.interceptAfterLLMCall(this, feature) { response ->
-       logger.info("Received LLM response: $response")
+   pipeline.interceptLLMCallCompleted(interceptContext) { eventContext ->
+       logger.info("Received LLM responses: ${eventContext.responses}")
    }
    ```
 
-10. **After LLM Call With Tools**: Execute code after a call to the language model with tools
+10. **LLM Call Completed (with tools)**: Access responses and tools via the event context
     ```kotlin
-    pipeline.interceptAfterLLMCallWithTools(this, feature) { response ->
-        logger.info("Received structured LLM response with role: ${response.role}")
+    pipeline.interceptLLMCallCompleted(interceptContext) { eventContext ->
+        logger.info("Received ${eventContext.responses.size} responses (tools used: ${eventContext.tools.size})")
+    }
+    ```
+
+11. **Subgraph Execution Starting**: Execute code before a subgraph runs
+    ```kotlin
+    pipeline.interceptSubgraphExecutionStarting(interceptContext) { eventContext ->
+        logger.info("Subgraph ${eventContext.subgraph.name} is about to execute with input: ${eventContext.input}")
+    }
+    ```
+
+12. **Subgraph Execution Completed**: Execute code after a subgraph completes
+    ```kotlin
+    pipeline.interceptSubgraphExecutionCompleted(interceptContext) { eventContext ->
+        logger.info("Subgraph ${eventContext.subgraph.name} executed with input: ${eventContext.input} and produced output: ${eventContext.output}")
+    }
+    ```
+
+13. **Subgraph Execution Failed**: Handle errors when a subgraph execution fails
+    ```kotlin
+    pipeline.interceptSubgraphExecutionFailed(interceptContext) { eventContext ->
+        logger.error("Subgraph ${eventContext.subgraph.name} execution failed with error: ${eventContext.throwable}")
     }
     ```
 
@@ -390,53 +523,47 @@ class LoggingFeature(val logger: Logger) {
         ) {
             val logging = LoggingFeature(LoggerFactory.getLogger(config.loggerName))
 
-            // Intercept agent started
-            pipeline.interceptBeforeAgentStarted(this, logging) {
-                readStages { stages ->
-                    stages.forEach { stage ->
-                        feature.logger.info("Stage ${stage.name} has ${stage.start.edges.size} edges")
-                    }
-                }
+            val interceptContext = InterceptContext(this, logging)
+
+            // Intercept agent starting
+            pipeline.interceptAgentStarting(interceptContext) { event ->
+                event.feature.logger.info("Agent starting: runId=${event.runId}")
             }
 
-            // Intercept strategy started
-            pipeline.interceptStrategyStarted(this, logging) {
-                readStages { stages ->
-                    stages.forEach { stage ->
-                        feature.logger.info("Strategy started with stage ${stage.name}")
-                    }
-                }
+            // Intercept strategy starting
+            pipeline.interceptStrategyStarting(interceptContext) { event ->
+                event.feature.logger.info("Strategy starting")
             }
 
             // Intercept before node execution
-            pipeline.interceptBeforeNode(this, logging) { node, context, input ->
-                logger.info("Node ${node.name} received input: $input")
+            pipeline.interceptNodeExecutionStarting(interceptContext) { eventContext ->
+                logger.info("Node ${eventContext.node.name} received input: ${eventContext.input}")
             }
 
             // Intercept after node execution
-            pipeline.interceptAfterNode(this, logging) { node, context, input, output ->
-                logger.info("Node ${node.name} with input: $input produced output: $output")
+            pipeline.interceptNodeExecutionCompleted(interceptContext) { eventContext ->
+                logger.info("Node ${eventContext.node.name} with input: ${eventContext.input} produced output: ${eventContext.output}")
             }
 
             // Intercept LLM calls
-            pipeline.interceptBeforeLLMCall(this, logging) { prompt ->
-                logger.info("Making LLM call with prompt: ${prompt.messages.lastOrNull()?.content?.take(100)}...")
+            pipeline.interceptLLMCallStarting(interceptContext) { eventContext ->
+                logger.info("Making LLM call with prompt: ${eventContext.prompt.messages.lastOrNull()?.content?.take(100)}...")
             }
 
-            pipeline.interceptAfterLLMCall(this, logging) { response ->
-                logger.info("Received LLM response: ${response.take(100)}...")
+            pipeline.interceptLLMCallCompleted(interceptContext) { eventContext ->
+                logger.info("Received LLM responses: ${eventContext.responses}")
             }
 
-            // Intercept LLM calls with tools
-            pipeline.interceptBeforeLLMCallWithTools(this, logging) { prompt, tools ->
-                logger.info("Making LLM call with ${tools.size} tools")
-                tools.forEach { tool ->
+            // Intercept LLM calls with tools (available via eventContext.tools)
+            pipeline.interceptLLMCallStarting(interceptContext) { eventContext ->
+                logger.info("Making LLM call with ${eventContext.tools.size} tools")
+                eventContext.tools.forEach { tool ->
                     logger.info("Tool available: ${tool.name}")
                 }
             }
 
-            pipeline.interceptAfterLLMCallWithTools(this, logging) { response ->
-                logger.info("Received structured LLM response with role: ${response.role}")
+            pipeline.interceptLLMCallCompleted(interceptContext) { eventContext ->
+                logger.info("Received ${eventContext.responses.size} response(s)")
             }
         }
     }
@@ -445,51 +572,156 @@ class LoggingFeature(val logger: Logger) {
 
 ## Available Features
 
-### AgentMemory
+### Debugger
 
-The AgentMemory provides persistent memory capabilities for agents. It allows agents to store and retrieve information across runs.
+The Debugger feature integrates into an AI agent's pipeline and intercepts various events such as agent start/finish, strategy execution, node execution, LLM calls, and tool operations. These events are collected and can be sent to a remote debugging server for real-time monitoring and analysis.
 
-> **Note**: AgentMemory is in a separate module and requires a separate dependency. It's defined in the `agents-features/agents-features-memory` module.
+Key capabilities of the Debugger feature include:
+- Monitoring the complete lifecycle of AI agent execution
+- Tracking strategy and node executions
+- Recording LLM calls and responses
+- Logging tool operations and their results
+- Capturing errors and exceptions during agent execution
+- Connecting to a remote debugging server for real-time monitoring
 
-Installation:
+### Using in your project
+
+To use the Debugger feature in your project, you need to install it when creating an AI agent. The feature can be configured with custom settings or used with default values.
+
+#### Basic Installation
 
 ```kotlin
-install(AgentMemory) {
-    memoryProvider = LocalFileMemoryProvider(
-        config = LocalMemoryConfig("my-agent-memory"),
-        storage = EncryptedStorage(
-            fs = JVMFileSystemProvider.ReadWrite,
-            encryption = Aes256GCMEncryptor(secretKey)
-        ),
-        fs = JVMFileSystemProvider.ReadWrite,
-        root = Path("path/to/memory/root")
-    )
-
-    featureName = "my-feature"
-    productName = "my-product"
-    organizationName = "my-organization"
+// When creating an agent
+val agent = createAgent(
+    // ... other agent configuration
+) {
+    // Install the Debugger feature with default settings
+    install(Debugger)
 }
 ```
 
-Usage:
+#### Custom Configuration
+
+You can customize the Debugger by specifying a port and connection timeout for the debugging server:
 
 ```kotlin
-// In a node implementation
-context.withMemory {
-    // Save facts to memory
-    saveFactsFromHistory(
-        concept = myConcept,
-        subject = MemorySubject.Project,
-        scope = MemoryScopeType.PRODUCT
-    )
+val agent = createAgent(
+    // ... other agent configuration
+) {
+    install(Debugger) {
+        // Set a specific port for the debugging server
+        setPort(8080)
 
-    // Load facts from memory
-    loadFactsToAgent(
-        concept = myConcept,
-        scopes = listOf(MemoryScopeType.PRODUCT),
-        subjects = listOf(MemorySubject.Project)
-    )
+        // Set a timeout for waiting for the first connection (optional)
+        // If not set, the server will wait indefinitely or use system variables
+        setConnectionWaitingTimeout(5.seconds)
+    }
 }
 ```
 
-For more details on using AgentMemory, see the examples in the `examples` module.
+#### Port Configuration Priority
+
+The Debugger feature determines the port to use in the following order:
+1. Explicitly set port in the configuration (using `setPort()`)
+2. Environment variable `KOOG_DEBUGGER_PORT`
+3. JVM option `-Dkoog.debugger.port=<port>`
+4. Default Koog remote server port (50881)
+
+#### Connection Timeout Configuration Priority
+
+The Debugger feature determines the connection waiting timeout in the following order:
+1. Explicitly set timeout in the configuration (using `setConnectionWaitingTimeout()`)
+2. Environment variable `KOOG_DEBUGGER_WAIT_CONNECTION_MS` (value in milliseconds)
+3. JVM option `-Dkoog.debugger.wait.connection.ms=<milliseconds>`
+4. Default behavior: wait indefinitely for the first connection
+
+#### Testing Debugger Feature
+
+You can test the Debugger feature by creating a client that connects to the debugging server and collects events:
+
+```kotlin
+// Server configuration (agent with Debugger)
+val port = findAvailablePort()
+val agent = createAgent(
+    // ... agent configuration
+) {
+    install(Debugger) {
+        setPort(port)
+    }
+}
+
+// Client configuration
+val clientConfig = DefaultClientConnectionConfig(
+    host = "127.0.0.1", 
+    port = port
+)
+
+// Create a client to collect events
+FeatureMessageRemoteClient(connectionConfig = clientConfig).use { client ->
+    // Collect and verify events
+    // ...
+    
+    // Run the agent
+    agent.run(userPrompt)
+}
+```
+
+### Example of usage
+
+Here's a complete example of using the Debugger feature in a real-world scenario:
+
+```kotlin
+// Create a strategy for the agent
+val strategy = strategy("example-strategy") {
+    val nodeLLMRequest by nodeLLMRequest("llm-request-node")
+    val nodeToolCall by nodeExecuteTool("tool-call-node")
+    val nodeSendToolResult by nodeLLMSendToolResult("send-tool-result-node")
+
+    edge(nodeStart forwardTo nodeLLMRequest)
+    edge(nodeLLMRequest forwardTo nodeToolCall onToolCall { true })
+    edge(nodeLLMRequest forwardTo nodeFinish onAssistantMessage { true })
+    edge(nodeToolCall forwardTo nodeSendToolResult)
+    edge(nodeSendToolResult forwardTo nodeFinish onAssistantMessage { true })
+    edge(nodeSendToolResult forwardTo nodeToolCall onToolCall { true })
+}
+
+// Create a tool registry
+val toolRegistry = ToolRegistry {
+    tool(SearchTool())
+    tool(CalculatorTool())
+}
+
+// Create an agent with the Debugger feature
+val agent = createAgent(
+    agentId = "example-agent",
+    strategy = strategy,
+    promptId = "example-prompt",
+    systemPrompt = "You are a helpful assistant.",
+    toolRegistry = toolRegistry,
+    model = myLLModel
+) {
+    // Install and configure the Debugger feature
+    install(Debugger) {
+        // Use a specific port or let it use the default
+        // setPort(8080)
+    }
+}
+
+// Use the agent
+agent.use { 
+    // Run the agent with a user prompt
+    val result = agent.run("Calculate 25 * 16 and then search for information about the result.")
+    
+    // Process the result
+    println("Agent result: $result")
+}
+```
+
+While the agent is running, the Debugger will collect events such as:
+- Agent start and finish events
+- Strategy execution events
+- Node execution events
+- LLM calls and responses
+- Tool calls and their results
+
+These events can be monitored through a debugging client connected to the specified port.

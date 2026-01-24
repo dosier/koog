@@ -4,7 +4,7 @@ import ai.koog.agents.core.feature.message.FeatureEvent
 import ai.koog.agents.core.feature.message.FeatureMessage
 import ai.koog.agents.core.feature.model.FeatureStringMessage
 import ai.koog.agents.core.feature.writer.FeatureMessageLogWriter.LogLevel
-import ai.koog.agents.utils.use
+import ai.koog.utils.io.use
 import io.github.oshai.kotlinlogging.KLogger
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,7 +30,7 @@ class FeatureMessageLogWriterTest {
                     "message: ${this.message}"
                 }
                 is FeatureEvent -> {
-                    "event id: ${this.eventId}"
+                    "feature events has no message provided"
                 }
                 else -> {
                     "UNDEFINED"
@@ -55,7 +55,7 @@ class FeatureMessageLogWriterTest {
 
         TestFeatureMessageLogWriter(targetLogger).use { writer ->
 
-            messages.forEach { message -> writer.processMessage(message) }
+            messages.forEach { message -> writer.onMessage(message) }
 
             val expectedLogMessages = messages.map { originalMessage ->
                 "[INFO] Received feature message [${originalMessage.messageType.value}]: message: ${originalMessage.message}"
@@ -70,16 +70,16 @@ class FeatureMessageLogWriterTest {
     @Test
     fun `test logger stream feature provider for event message`() = runBlocking {
         val messages = listOf(
-            TestFeatureEventMessage("test-event-1"),
-            TestFeatureEventMessage("test-event-2"),
+            TestFeatureEventMessage(testMessage = "test-event-1"),
+            TestFeatureEventMessage(testMessage = "test-event-2"),
         )
 
         TestFeatureMessageLogWriter(targetLogger).use { writer ->
 
-            messages.forEach { message -> writer.processMessage(message) }
+            messages.forEach { message -> writer.onMessage(message) }
 
             val expectedLogMessages = messages.map { originalMessage ->
-                "[INFO] Received feature message [${originalMessage.messageType.value}]: event id: ${originalMessage.eventId}"
+                "[INFO] Received feature message [${originalMessage.messageType.value}]: feature events has no message provided"
             }
 
             assertEquals(expectedLogMessages.size, targetLogger.messages.size)
@@ -92,16 +92,16 @@ class FeatureMessageLogWriterTest {
     fun `test logger stream feature provider for multiple messages`() = runBlocking {
         val messages = listOf(
             FeatureStringMessage("test message 1"),
-            TestFeatureEventMessage("test event 1"),
+            TestFeatureEventMessage(testMessage = "test event 1"),
         )
 
         TestFeatureMessageLogWriter(targetLogger).use { writer ->
 
-            messages.forEach { message -> writer.processMessage(message) }
+            messages.forEach { message -> writer.onMessage(message) }
 
             val expectedLogMessages = listOf(
                 "[INFO] Received feature message [${messages[0].messageType.value}]: message: ${(messages[0] as FeatureStringMessage).message}",
-                "[INFO] Received feature message [${messages[1].messageType.value}]: event id: ${(messages[1] as TestFeatureEventMessage).eventId}"
+                "[INFO] Received feature message [${messages[1].messageType.value}]: feature events has no message provided"
             )
 
             assertEquals(expectedLogMessages.size, targetLogger.messages.size)
@@ -118,7 +118,7 @@ class FeatureMessageLogWriterTest {
         )
 
         TestFeatureMessageLogWriter(targetLogger, LogLevel.DEBUG).use { writer ->
-            messages.forEach { message -> writer.processMessage(message) }
+            messages.forEach { message -> writer.onMessage(message) }
 
             val expectedLogMessages = messages.map { originalMessage ->
                 "[DEBUG] Received feature message [${originalMessage.messageType.value}]: message: ${originalMessage.message}"
@@ -133,15 +133,15 @@ class FeatureMessageLogWriterTest {
     @Test
     fun `test logger with DEBUG log level for event message`() = runBlocking {
         val messages = listOf(
-            TestFeatureEventMessage("debug-test-event-1"),
-            TestFeatureEventMessage("debug-test-event-2"),
+            TestFeatureEventMessage(testMessage = "debug-test-event-1"),
+            TestFeatureEventMessage(testMessage = "debug-test-event-2"),
         )
 
         TestFeatureMessageLogWriter(targetLogger, LogLevel.DEBUG).use { writer ->
-            messages.forEach { message -> writer.processMessage(message) }
+            messages.forEach { message -> writer.onMessage(message) }
 
             val expectedLogMessages = messages.map { originalMessage ->
-                "[DEBUG] Received feature message [${originalMessage.messageType.value}]: event id: ${originalMessage.eventId}"
+                "[DEBUG] Received feature message [${originalMessage.messageType.value}]: feature events has no message provided"
             }
 
             assertEquals(expectedLogMessages.size, targetLogger.messages.size)
@@ -156,12 +156,12 @@ class FeatureMessageLogWriterTest {
 
         val messages = listOf(
             FeatureStringMessage("debug disabled message"),
-            TestFeatureEventMessage("debug disabled event")
+            TestFeatureEventMessage(testMessage = "debug disabled event")
         )
 
         // Even though we set LogLevel.DEBUG, messages should be added as debug logs.
         TestFeatureMessageLogWriter(testLogger, LogLevel.DEBUG).use { writer ->
-            messages.forEach { message -> writer.processMessage(message) }
+            messages.forEach { message -> writer.onMessage(message) }
             assertEquals(2, testLogger.messages.size)
         }
     }
@@ -172,12 +172,12 @@ class FeatureMessageLogWriterTest {
 
         val messages = listOf(
             FeatureStringMessage("info disabled message"),
-            TestFeatureEventMessage("info disabled event")
+            TestFeatureEventMessage(testMessage = "info disabled event")
         )
 
         // Even though we set LogLevel.INFO, messages should be added as info logs.
         TestFeatureMessageLogWriter(testLogger, LogLevel.INFO).use { writer ->
-            messages.forEach { message -> writer.processMessage(message) }
+            messages.forEach { message -> writer.onMessage(message) }
             assertEquals(2, testLogger.messages.size)
         }
     }

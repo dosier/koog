@@ -6,18 +6,26 @@ agents into your Spring Boot applications with minimal setup.
 ## Overview
 
 The `koog-spring-boot-starter` automatically configures LLM clients based on your application properties and provides
-ready-to-use beans for dependency injection. It supports all major LLM providers including OpenAI, Anthropic, Google,
-OpenRouter, DeepSeek, and Ollama.
+ready-to-use beans for dependency injection. It supports all major LLM providers including:
+
+- OpenAI
+- Anthropic
+- Google
+- OpenRouter
+- DeepSeek
+- Ollama
 
 ## Getting Started
 
 ### 1. Add Dependency
 
-Add the Spring Boot starter to your `build.gradle.kts`:
+Add the Koog Spring Boot starter and [Ktor Client Engine](https://ktor.io/docs/client-engines.html#jvm) 
+to your `build.gradle.kts` or `pom.xml`:
 
 ```kotlin
 dependencies {
     implementation("ai.koog:koog-spring-boot-starter:$koogVersion")
+    implementation("io.ktor:ktor-client-okhttp-jvm:$ktorVersion")
 }
 ```
 
@@ -27,21 +35,27 @@ Configure your preferred LLM providers in `application.properties`:
 
 ```properties
 # OpenAI Configuration
+ai.koog.openai.enabled=true
 ai.koog.openai.api-key=${OPENAI_API_KEY}
 ai.koog.openai.base-url=https://api.openai.com
 # Anthropic Configuration  
+ai.koog.anthropic.enabled=true
 ai.koog.anthropic.api-key=${ANTHROPIC_API_KEY}
 ai.koog.anthropic.base-url=https://api.anthropic.com
 # Google Configuration
+ai.koog.google.enabled=true
 ai.koog.google.api-key=${GOOGLE_API_KEY}
 ai.koog.google.base-url=https://generativelanguage.googleapis.com
 # OpenRouter Configuration
+ai.koog.openrouter.enabled=true
 ai.koog.openrouter.api-key=${OPENROUTER_API_KEY}
 ai.koog.openrouter.base-url=https://openrouter.ai
 # DeepSeek Configuration
+ai.koog.deepseek.enabled=true
 ai.koog.deepseek.api-key=${DEEPSEEK_API_KEY}
 ai.koog.deepseek.base-url=https://api.deepseek.com
 # Ollama Configuration (local - no API key required)
+ai.koog.ollama.enabled=true
 ai.koog.ollama.base-url=http://localhost:11434
 ```
 
@@ -51,26 +65,53 @@ Or using YAML format (`application.yml`):
 ai:
     koog:
         openai:
+            enabled: true
             api-key: ${OPENAI_API_KEY}
             base-url: https://api.openai.com
         anthropic:
+            enabled: true
             api-key: ${ANTHROPIC_API_KEY}
             base-url: https://api.anthropic.com
         google:
+            enabled: true
             api-key: ${GOOGLE_API_KEY}
             base-url: https://generativelanguage.googleapis.com
         openrouter:
+            enabled: true
             api-key: ${OPENROUTER_API_KEY}
             base-url: https://openrouter.ai
         deepseek:
+            enabled: true
             api-key: ${DEEPSEEK_API_KEY}
             base-url: https://api.deepseek.com
         ollama:
+            enabled: true # Set it to `true` explicitly to activate !!!
             base-url: http://localhost:11434
 ```
 
+Both `ai.koog.PROVIDER.api-key` and `ai.koog.PROVIDER.enabled` properties are used to activate the provider.
+
+If the provider supports the API Key (like OpenAI, Anthropic, Google), then `ai.koog.PROVIDER.enabled` is set to `true`
+by default.
+
+If the provider does not support the API Key, like Ollama, `ai.koog.PROVIDER.enabled` is set to `false` by default,
+and provider should be enabled explicitly in the application configuration.
+
+Provider's base urls are set to their default values in the Spring Boot starter, but you may override it in your
+application.
+
 !!! tip "Environment Variables"
 It's recommended to use environment variables for API keys to keep them secure and out of version control.
+Spring configuration uses LLM provider's well-known environment variables.
+For example, setting the environment variable `OPENAI_API_KEY` is enough for OpenAI spring configuration to activate.
+
+| LLM Provider | Environment Variables |
+|--------------|-----------------------|
+| Open AI      | `OPENAI_API_KEY`      |
+| Anthropic    | `ANTHROPIC_API_KEY`   |
+| Google       | `GOOGLE_API_KEY`      |
+| OpenRouter   | `OPENROUTER_API_KEY`  |
+| DeepSeek     | `DEEPSEEK_API_KEY`    |
 
 ### 3. Inject and Use
 
@@ -79,8 +120,8 @@ Inject the auto-configured executors into your services:
 ```kotlin
 @Service
 class AIService(
-    private val openAIExecutor: SingleLLMPromptExecutor?,
-    private val anthropicExecutor: SingleLLMPromptExecutor?
+    private val openAIExecutor: MultiLLMPromptExecutor?,
+    private val anthropicExecutor: MultiLLMPromptExecutor?
 ) {
 
     suspend fun generateResponse(input: String): String {
@@ -114,7 +155,7 @@ Create a chat endpoint using auto-configured executors:
 @RestController
 @RequestMapping("/api/chat")
 class ChatController(
-    private val anthropicExecutor: SingleLLMPromptExecutor?
+    private val anthropicExecutor: MultiLLMPromptExecutor?
 ) {
 
     @PostMapping
@@ -150,9 +191,9 @@ Handle multiple providers with fallback logic:
 ```kotlin
 @Service
 class RobustAIService(
-    private val openAIExecutor: SingleLLMPromptExecutor?,
-    private val anthropicExecutor: SingleLLMPromptExecutor?,
-    private val openRouterExecutor: SingleLLMPromptExecutor?
+    private val openAIExecutor: MultiLLMPromptExecutor?,
+    private val anthropicExecutor: MultiLLMPromptExecutor?,
+    private val openRouterExecutor: MultiLLMPromptExecutor?
 ) {
 
     suspend fun generateWithFallback(input: String): String {
@@ -189,7 +230,7 @@ You can also inject configuration properties for custom logic:
 ```kotlin
 @Service
 class ConfigurableAIService(
-    private val openAIExecutor: SingleLLMPromptExecutor?,
+    private val openAIExecutor: MultiLLMPromptExecutor?,
     @Value("\${ai.koog.openai.api-key:}") private val openAIKey: String
 ) {
 
@@ -242,7 +283,7 @@ The auto-configuration creates the following beans (when configured):
 **Bean not found error:**
 
 ```
-No qualifying bean of type 'SingleLLMPromptExecutor' available
+No qualifying bean of type 'MultiLLMPromptExecutor' available
 ```
 
 **Solution:** Ensure you have configured at least one provider in your properties file.
@@ -250,7 +291,7 @@ No qualifying bean of type 'SingleLLMPromptExecutor' available
 **Multiple beans error:**
 
 ```
-Multiple qualifying beans of type 'SingleLLMPromptExecutor' available
+Multiple qualifying beans of type 'MultiLLMPromptExecutor' available
 ```
 
 **Solution:** Use `@Qualifier` to specify which bean you want:
@@ -258,8 +299,8 @@ Multiple qualifying beans of type 'SingleLLMPromptExecutor' available
 ```kotlin
 @Service
 class MyService(
-    @Qualifier("openAIExecutor") private val openAIExecutor: SingleLLMPromptExecutor,
-    @Qualifier("anthropicExecutor") private val anthropicExecutor: SingleLLMPromptExecutor
+    @Qualifier("openAIExecutor") private val openAIExecutor: MultiLLMPromptExecutor,
+    @Qualifier("anthropicExecutor") private val anthropicExecutor: MultiLLMPromptExecutor
 ) {
     // ...
 }
@@ -276,7 +317,7 @@ API key is required but not provided
 ## Best Practices
 
 1. **Environment Variables**: Always use environment variables for API keys
-2. **Nullable Injection**: Use nullable types (`SingleLLMPromptExecutor?`) to handle cases where providers aren't
+2. **Nullable Injection**: Use nullable types (`MultiLLMPromptExecutor?`) to handle cases where providers aren't
    configured
 3. **Fallback Logic**: Implement fallback mechanisms when using multiple providers
 4. **Error Handling**: Always wrap executor calls in try-catch blocks for production code
@@ -285,8 +326,8 @@ API key is required but not provided
 
 ## Next Steps
 
-- Learn about [Single Run Agents](single-run-agents.md) to build basic AI workflows
-- Explore [Complex Workflow Agents](complex-workflow-agents.md) for advanced use cases
-- See [Tools Overview](tools-overview.md) to extend your agents' capabilities
-- Check out [Examples](examples.md) for real-world implementations
-- Read [Key Concepts](key-concepts.md) to understand the framework better
+- Learn about the [basic agents](basic-agents.md) to build minimal AI workflows
+- Explore [complex workflow agents](complex-workflow-agents.md) for advanced use cases
+- See the [tools overview](tools-overview.md) to extend your agents' capabilities
+- Check out [examples](examples.md) for real-world implementations
+- Read the [glossary](glossary.md) to understand the framework better

@@ -1,77 +1,23 @@
 package ai.koog.agents.features.sql.providers
 
 import ai.koog.agents.snapshot.feature.AgentCheckpointData
+import ai.koog.agents.snapshot.providers.PersistenceUtils
 import kotlin.time.Clock
+import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
-import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
+import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.upsert
 
 /**
- * Configuration for TTL cleanup behavior
- *
- * @property enabled Whether TTL cleanup should be performed automatically
- * @property intervalMs Minimum interval between cleanup operations in milliseconds (default: 1 minute)
- */
-public data class CleanupConfig(
-    val enabled: Boolean = true,
-    val intervalMs: Long = 60_000L
-) {
-    /**
-     * Companion object for CleanupConfig providing factory methods for creating configuration instances.
-     */
-    public companion object {
-        /**
-         * Creates a default CleanupConfig instance with automatic TTL cleanup enabled
-         * and a default interval of 1 minute between cleanup operations.
-         *
-         * @return A CleanupConfig instance with default settings.
-         */
-        public fun default(): CleanupConfig = CleanupConfig()
-
-        /**
-         * Creates a CleanupConfig instance with automatic TTL cleanup disabled.
-         *
-         * @return A CleanupConfig instance with the `enabled` property set to `false`.
-         */
-        public fun disabled(): CleanupConfig = CleanupConfig(enabled = false)
-    }
-}
-
-/**
- * Exposed table definition for storing agent checkpoints.
- *
- * Schema:
- * - Composite primary key: (persistence_id, checkpoint_id)
- * - Timestamp for ordering and querying
- * - JSON column for flexible checkpoint data storage
- * - Optional TTL timestamp for expiration (indexed for efficient cleanup)
- */
-@Suppress("MissingKDocForPublicAPI")
-public open class CheckpointsTable(tableName: String) : Table(tableName) {
-    public val persistenceId: Column<String> = varchar("persistence_id", 255)
-    public val checkpointId: Column<String> = varchar("checkpoint_id", 255)
-    public val createdAt: Column<Long> = long("created_at").index()
-    public val checkpointJson: Column<String> = text("checkpoint_json")
-    public val ttlTimestamp: Column<Long?> = long("ttl_timestamp").nullable().index()
-
-    override val primaryKey: PrimaryKey = PrimaryKey(persistenceId, checkpointId)
-
-    init {
-        // Create composite index for efficient queries
-        index(isUnique = false, persistenceId, createdAt)
-    }
-}
-
-/**
- * An abstract Exposed-based implementation of [SQLPersistencyStorageProvider] for managing
+ * An abstract Exposed-based implementation of [SQLPersistenceStorageProvider] for managing
  * agent checkpoints in SQL databases using JetBrains Exposed ORM.
  *
  * This class provides a generic SQL implementation that works with any database supported
@@ -89,7 +35,6 @@ public open class CheckpointsTable(tableName: String) : Table(tableName) {
  * - PostgreSQL: Full support including JSONB columns
  * - MySQL: JSON column support (5.7+)
  * - H2: JSON stored as TEXT with parsing
- * - SQLite: JSON stored as TEXT with parsing
  *
  * ## Performance Considerations:
  * - Uses database-specific JSON operations where available
@@ -105,20 +50,17 @@ public open class CheckpointsTable(tableName: String) : Table(tableName) {
  * - When TTL is not configured (ttlSeconds = null), no TTL processing occurs
  *
  * @constructor Initializes the Exposed persistence provider.
- * @param persistenceId Unique identifier for this agent's persistence data
  * @param database The Exposed Database instance to use
  * @param tableName Name of the table to store checkpoints (default: "agent_checkpoints")
  * @param ttlSeconds Optional TTL for checkpoint entries in seconds (null = no expiration)
  */
-@Suppress("MissingKDocForPublicAPI")
-public abstract class ExposedPersistencyStorageProvider(
-    persistenceId: String,
+public abstract class ExposedPersistenceStorageProvider @JvmOverloads constructor(
     protected val database: Database,
     tableName: String = "agent_checkpoints",
     ttlSeconds: Long? = null,
-    migrator: SQLPersistenceSchemaMigrator
-) : SQLPersistencyStorageProvider(
-    persistenceId = persistenceId,
+    migrator: SQLPersistenceSchemaMigrator,
+    private val json: Json = PersistenceUtils.defaultCheckpointJson
+) : SQLPersistenceStorageProvider<ExposedPersistenceFilter>(
     tableName = tableName,
     ttlSeconds = ttlSeconds,
     migrator
@@ -141,6 +83,7 @@ public abstract class ExposedPersistencyStorageProvider(
      * 2. TTL is configured (ttlSeconds is not null)
      * 3. Enough time has passed since last cleanup
      */
+    @JvmOverloads
     public suspend fun conditionalCleanup(cleanupConfig: CleanupConfig = CleanupConfig.default()) {
         // Skip cleanup entirely if disabled or no TTL configured
         if (!cleanupConfig.enabled || ttlSeconds == null) {
@@ -167,8 +110,7 @@ public abstract class ExposedPersistencyStorageProvider(
 
         transaction {
             val deletedCount = checkpointsTable.deleteWhere {
-                (checkpointsTable.ttlTimestamp less now) and
-                    (checkpointsTable.ttlTimestamp.isNotNull())
+                (checkpointsTable.ttlTimestamp less now) and (checkpointsTable.ttlTimestamp.isNotNull())
             }
             if (deletedCount > 0) {
                 lastCleanupTime = now
@@ -176,14 +118,24 @@ public abstract class ExposedPersistencyStorageProvider(
         }
     }
 
-    override suspend fun getCheckpoints(): List<AgentCheckpointData> {
-        return transaction {
-            checkpointsTable
-                .select(checkpointsTable.checkpointJson)
-                .where {
-                    checkpointsTable.persistenceId eq this@ExposedPersistencyStorageProvider.persistenceId
+    @JvmOverloads
+    override suspend fun getCheckpoints(agentId: String, filter: ExposedPersistenceFilter?): List<AgentCheckpointData> {
+        if (filter == null) {
+            val now = Clock.System.now().toEpochMilliseconds()
+            return transaction {
+                checkpointsTable.select(checkpointsTable.checkpointJson).where {
+                    (checkpointsTable.persistenceId eq agentId) and
+                        ((checkpointsTable.ttlTimestamp eq null) or (checkpointsTable.ttlTimestamp greaterEq now))
+                }.mapNotNull { row ->
+                    runCatching {
+                        json.decodeFromString<AgentCheckpointData>(row[checkpointsTable.checkpointJson])
+                    }.getOrNull()
                 }
-                .orderBy(checkpointsTable.createdAt to SortOrder.ASC)
+            }
+        }
+
+        return transaction {
+            filter.query(checkpointsTable)
                 .mapNotNull { row ->
                     runCatching {
                         json.decodeFromString<AgentCheckpointData>(row[checkpointsTable.checkpointJson])
@@ -192,30 +144,45 @@ public abstract class ExposedPersistencyStorageProvider(
         }
     }
 
-    override suspend fun saveCheckpoint(agentCheckpointData: AgentCheckpointData) {
+    override suspend fun saveCheckpoint(agentId: String, agentCheckpointData: AgentCheckpointData) {
         val checkpointJson = json.encodeToString(agentCheckpointData)
         val ttlTimestamp = calculateTtlTimestamp(agentCheckpointData.createdAt)
 
         transaction {
-            // Use upsert for idempotent saves
             checkpointsTable.upsert {
-                it[checkpointsTable.persistenceId] = this@ExposedPersistencyStorageProvider.persistenceId
+                it[checkpointsTable.persistenceId] = agentId
                 it[checkpointsTable.checkpointId] = agentCheckpointData.checkpointId
                 it[checkpointsTable.createdAt] = agentCheckpointData.createdAt.toEpochMilliseconds()
                 it[checkpointsTable.checkpointJson] = checkpointJson
                 it[checkpointsTable.ttlTimestamp] = ttlTimestamp
+                it[checkpointsTable.version] = agentCheckpointData.version
             }
         }
     }
 
-    override suspend fun getLatestCheckpoint(): AgentCheckpointData? {
+    override suspend fun getLatestCheckpoint(agentId: String, filter: ExposedPersistenceFilter?): AgentCheckpointData? {
+        if (filter == null) {
+            val now = Clock.System.now().toEpochMilliseconds()
+            return transaction {
+                checkpointsTable
+                    .select(checkpointsTable.checkpointJson)
+                    .where {
+                        (checkpointsTable.persistenceId eq agentId) and
+                            ((checkpointsTable.ttlTimestamp eq null) or (checkpointsTable.ttlTimestamp greaterEq now))
+                    }
+                    .orderBy(checkpointsTable.version to SortOrder.DESC)
+                    .limit(1)
+                    .firstNotNullOfOrNull { row ->
+                        runCatching {
+                            json.decodeFromString<AgentCheckpointData>(row[checkpointsTable.checkpointJson])
+                        }
+                    }?.getOrNull()
+            }
+        }
+
         return transaction {
-            checkpointsTable
-                .select(checkpointsTable.checkpointJson)
-                .where {
-                    checkpointsTable.persistenceId eq this@ExposedPersistencyStorageProvider.persistenceId
-                }
-                .orderBy(checkpointsTable.createdAt to SortOrder.DESC)
+            filter
+                .query(checkpointsTable)
                 .limit(1)
                 .firstOrNull()?.let { row ->
                     runCatching {
@@ -225,27 +192,26 @@ public abstract class ExposedPersistencyStorageProvider(
         }
     }
 
-    override suspend fun deleteCheckpoint(checkpointId: String) {
+    override suspend fun deleteCheckpoint(agentId: String, checkpointId: String) {
         transaction {
             checkpointsTable.deleteWhere {
-                (checkpointsTable.persistenceId eq this@ExposedPersistencyStorageProvider.persistenceId) and
-                    (checkpointsTable.checkpointId eq checkpointId)
+                (checkpointsTable.persistenceId eq agentId) and (checkpointsTable.checkpointId eq checkpointId)
             }
         }
     }
 
-    override suspend fun deleteAllCheckpoints() {
+    override suspend fun deleteAllCheckpoints(agentId: String) {
         transaction {
             checkpointsTable.deleteWhere {
-                checkpointsTable.persistenceId eq this@ExposedPersistencyStorageProvider.persistenceId
+                checkpointsTable.persistenceId eq agentId
             }
         }
     }
 
-    override suspend fun getCheckpointCount(): Long {
+    override suspend fun getCheckpointCount(agentId: String): Long {
         return transaction {
             checkpointsTable.selectAll().where {
-                checkpointsTable.persistenceId eq this@ExposedPersistencyStorageProvider.persistenceId
+                checkpointsTable.persistenceId eq agentId
             }.count()
         }
     }
