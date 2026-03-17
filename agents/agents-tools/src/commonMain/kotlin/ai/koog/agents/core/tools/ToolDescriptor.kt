@@ -1,5 +1,7 @@
 package ai.koog.agents.core.tools
 
+import ai.koog.prompt.params.LLMParams
+
 /**
  * Represents a descriptor for a tool that contains information about the tool's name, description, required parameters,
  * and optional parameters.
@@ -10,12 +12,18 @@ package ai.koog.agents.core.tools
  * @property description The description of the tool.
  * @property requiredParameters A list of ToolParameterDescriptor representing the required parameters for the tool.
  * @property optionalParameters A list of ToolParameterDescriptor representing the optional parameters for the tool.
+ * @property cacheControl Optional cache control setting for this tool definition.
+ * When set, signals to LLM providers (like Anthropic) that tool definitions up to and including
+ * this tool should be cached. This is useful for reducing latency and cost when the same tools
+ * are used across multiple requests. Cache control is applied per-tool, allowing fine-grained
+ * control over which tools act as cache breakpoints.
  */
 public open class ToolDescriptor(
     public val name: String,
     public val description: String,
     public val requiredParameters: List<ToolParameterDescriptor> = emptyList(),
     public val optionalParameters: List<ToolParameterDescriptor> = emptyList(),
+    public val cacheControl: LLMParams.CacheControl? = null,
 ) {
     /**
      * Creates a copy of the current ToolDescriptor with the option to modify specific attributes.
@@ -26,6 +34,7 @@ public open class ToolDescriptor(
      * Defaults to the current required parameters if not provided.
      * @param optionalParameters A list of ToolParameterDescriptor representing the optional parameters for the tool.
      * Defaults to the current optional parameters if not provided.
+     * @param cacheControl Optional cache control setting for this tool. Defaults to the current cache control if not provided.
      * @return A new instance of ToolDescriptor with the updated attributes.
      */
     public fun copy(
@@ -33,12 +42,14 @@ public open class ToolDescriptor(
         description: String = this.description,
         requiredParameters: List<ToolParameterDescriptor> = this.requiredParameters.toList(),
         optionalParameters: List<ToolParameterDescriptor> = this.optionalParameters.toList(),
+        cacheControl: LLMParams.CacheControl? = this.cacheControl,
     ): ToolDescriptor {
         return ToolDescriptor(
             name = name,
             description = description,
             requiredParameters = requiredParameters,
             optionalParameters = optionalParameters,
+            cacheControl = cacheControl,
         )
     }
 
@@ -50,12 +61,13 @@ public open class ToolDescriptor(
         if (description != other.description) return false
         if (requiredParameters != other.requiredParameters) return false
         if (optionalParameters != other.optionalParameters) return false
+        if (cacheControl != other.cacheControl) return false
 
         return true
     }
 
     override fun toString(): String {
-        return "ToolDescriptor(name=$name, description=$description, requiredParameters=$requiredParameters, optionalParameters=$optionalParameters)"
+        return "ToolDescriptor(name=$name, description=$description, requiredParameters=$requiredParameters, optionalParameters=$optionalParameters, cacheControl=$cacheControl)"
     }
 
     override fun hashCode(): Int {
@@ -63,6 +75,20 @@ public open class ToolDescriptor(
         result = 31 * result + description.hashCode()
         result = 31 * result + requiredParameters.hashCode()
         result = 31 * result + optionalParameters.hashCode()
+        result = 31 * result + (cacheControl?.hashCode() ?: 0)
         return result
     }
 }
+
+/**
+ * Creates a copy of this ToolDescriptor with the specified cache control setting.
+ *
+ * This is a convenience extension function for setting cache control on tool definitions.
+ * When cache control is set, LLM providers like Anthropic will cache tool definitions
+ * up to and including this tool, reducing latency and cost for repeated requests.
+ *
+ * @param cacheControl The cache control setting to apply to this tool.
+ * @return A new ToolDescriptor with the cache control setting applied.
+ */
+public fun ToolDescriptor.withCacheControl(cacheControl: LLMParams.CacheControl): ToolDescriptor =
+    copy(cacheControl = cacheControl)

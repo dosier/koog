@@ -1,5 +1,6 @@
 package ai.koog.prompt.message
 
+import ai.koog.prompt.params.LLMParams
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -164,5 +165,68 @@ class ResponseMetaInfoTest {
         assertEquals(40, updated.outputTokensCount)
         assertEquals(50, updated.cacheCreationTokens)
         assertEquals(10, updated.cacheReadTokens)
+    }
+
+    @Test
+    fun testCacheControlEphemeral() {
+        val metaInfo = ResponseMetaInfo.create(
+            clock = fixedClock,
+            cacheControl = LLMParams.CacheControl.Ephemeral
+        )
+
+        assertEquals(LLMParams.CacheControl.Ephemeral, metaInfo.cacheControl)
+    }
+
+    @Test
+    fun testCacheControlExtended() {
+        val metaInfo = ResponseMetaInfo.create(
+            clock = fixedClock,
+            cacheControl = LLMParams.CacheControl.Extended
+        )
+
+        assertEquals(LLMParams.CacheControl.Extended, metaInfo.cacheControl)
+    }
+
+    @Test
+    fun testCacheControlNullByDefault() {
+        val metaInfo = ResponseMetaInfo.create(
+            clock = fixedClock,
+            totalTokensCount = 100
+        )
+
+        assertNull(metaInfo.cacheControl)
+    }
+
+    @Test
+    fun testCacheControlWithCacheMetrics() {
+        // Test that cacheControl (for future requests) is independent from cacheCreationTokens/cacheReadTokens (from past requests)
+        val metaInfo = ResponseMetaInfo.create(
+            clock = fixedClock,
+            cacheCreationTokens = 80,
+            cacheReadTokens = 20,
+            cacheControl = LLMParams.CacheControl.Ephemeral
+        )
+
+        assertEquals(80, metaInfo.cacheCreationTokens)
+        assertEquals(20, metaInfo.cacheReadTokens)
+        assertEquals(LLMParams.CacheControl.Ephemeral, metaInfo.cacheControl)
+    }
+
+    @Test
+    fun testDataClassCopyWithCacheControl() {
+        val original = ResponseMetaInfo(
+            timestamp = fixedClock.now(),
+            totalTokensCount = 100,
+            inputTokensCount = 60,
+            outputTokensCount = 40,
+            cacheControl = null
+        )
+
+        val updated = original.copy(
+            cacheControl = LLMParams.CacheControl.Ephemeral
+        )
+
+        assertEquals(100, updated.totalTokensCount)
+        assertEquals(LLMParams.CacheControl.Ephemeral, updated.cacheControl)
     }
 }

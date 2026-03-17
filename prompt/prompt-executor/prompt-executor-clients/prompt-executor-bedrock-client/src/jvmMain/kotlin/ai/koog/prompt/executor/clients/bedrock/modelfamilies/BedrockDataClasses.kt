@@ -216,9 +216,13 @@ public data class BedrockAnthropicResponse(
  *
  * @property inputTokens The number of tokens sent as input.
  * @property outputTokens The number of tokens received as output.
+ * @property cacheCreationInputTokens The number of tokens written to the cache. Present when prompt caching is enabled.
+ * @property cacheReadInputTokens The number of tokens read from the cache. Present when a cache hit occurs.
  */
 @Serializable
 public data class BedrockAnthropicUsage(
     val inputTokens: Int,
-    val outputTokens: Int
+    val outputTokens: Int,
+    val cacheCreationInputTokens: Int? = null,
+    val cacheReadInputTokens: Int? = null,
 )

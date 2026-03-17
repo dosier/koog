@@ -310,16 +310,27 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
         stream: Boolean
     ): String {
         val anthropicParams = prompt.params.toAnthropicParams()
-        val cacheControl = anthropicParams.cacheControl?.toAnthropicCacheControl()
+        val defaultCacheControl = toAnthropicCacheControl(anthropicParams.cacheControl)
 
-        val systemMessage = mutableListOf<SystemAnthropicMessage>()
+        // Check if any messages have per-message cache control set
+        val hasPerMessageCacheControl = prompt.messages.any { message ->
+            when (message) {
+                is Message.Request -> message.metaInfo.cacheControl != null
+                is Message.Response -> message.metaInfo.cacheControl != null
+                else -> false
+            }
+        }
+
+        val systemMessages = mutableListOf<SystemAnthropicMessage>()
         val messages = mutableListOf<AnthropicMessage>()
 
         for (message in prompt.messages) {
             when (message) {
                 is Message.System -> {
                     if (!message.content.isEmpty()) {
-                        systemMessage.add(SystemAnthropicMessage(message.content))
+                        // Use per-message cache control if set, otherwise leave null (will be set later if default is used)
+                        val msgCacheControl = toAnthropicCacheControl(message.metaInfo.cacheControl)
+                        systemMessages.add(SystemAnthropicMessage(message.content, cacheControl = msgCacheControl))
                     }
                 }
 
@@ -328,9 +339,10 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                 }
 
                 is Message.Assistant -> {
+                    val msgCacheControl = toAnthropicCacheControl(message.metaInfo.cacheControl)
                     messages.add(
                         AnthropicMessage.Assistant(
-                            content = listOf(AnthropicContent.Text(message.content))
+                            content = listOf(AnthropicContent.Text(message.content, cacheControl = msgCacheControl))
                         )
                     )
                 }
@@ -350,12 +362,14 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                 }
 
                 is Message.Tool.Result -> {
+                    val msgCacheControl = toAnthropicCacheControl(message.metaInfo.cacheControl)
                     messages.add(
                         AnthropicMessage.User(
                             content = listOf(
                                 AnthropicContent.ToolResult(
                                     toolUseId = message.id ?: "",
-                                    content = message.content
+                                    content = message.content,
+                                    cacheControl = msgCacheControl
                                 )
                             )
                         )
@@ -363,6 +377,7 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                 }
 
                 is Message.Tool.Call -> {
+                    val msgCacheControl = toAnthropicCacheControl(message.metaInfo.cacheControl)
                     // Create a new assistant message with the tool call
                     messages.add(
                         AnthropicMessage.Assistant(
@@ -370,7 +385,8 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                                 AnthropicContent.ToolUse(
                                     id = message.id ?: Uuid.random().toString(),
                                     name = message.tool,
-                                    input = Json.parseToJsonElement(message.content).jsonObject
+                                    input = Json.parseToJsonElement(message.content).jsonObject,
+                                    cacheControl = msgCacheControl
                                 )
                             )
                         )
@@ -379,19 +395,25 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
             }
         }
 
-        // Apply cache control to the last system message if caching is enabled
-        val systemMessagesWithCache = if (cacheControl != null && systemMessage.isNotEmpty()) {
-            systemMessage.mapIndexed { index, msg ->
+        // Apply default cache control to the last system message if:
+        // 1. No per-message cache controls are set
+        // 2. Default cache control is specified in params
+        // 3. There are system messages
+        val systemMessagesWithCache = if (!hasPerMessageCacheControl && defaultCacheControl != null && systemMessages.isNotEmpty()) {
+            systemMessages.mapIndexed { index, msg ->
                 // Apply cache control to the last system message
-                if (index == systemMessage.lastIndex) {
-                    msg.copy(cacheControl = cacheControl)
+                if (index == systemMessages.lastIndex) {
+                    msg.copy(cacheControl = defaultCacheControl)
                 } else {
                     msg
                 }
             }
         } else {
-            systemMessage
+            systemMessages
         }
+
+        // Check if any tools have per-tool cache control set
+        val hasPerToolCacheControl = tools.any { it.cacheControl != null }
 
         val anthropicTools = tools.mapIndexed { index, tool ->
             val properties = mutableMapOf<String, JsonElement>()
@@ -404,11 +426,14 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                 )
             }
 
-            // Apply cache control to the last tool if caching is enabled
-            val toolCacheControl = if (cacheControl != null && index == tools.lastIndex) {
-                cacheControl
-            } else {
-                null
+            // Determine cache control for this tool:
+            // 1. If tool has per-tool cache control, use it
+            // 2. Otherwise, if no per-tool and no per-message cache controls are set,
+            //    apply default cache control to the last tool
+            val toolCacheControl = when {
+                tool.cacheControl != null -> toAnthropicCacheControl(tool.cacheControl)
+                !hasPerToolCacheControl && !hasPerMessageCacheControl && defaultCacheControl != null && index == tools.lastIndex -> defaultCacheControl
+                else -> null
             }
 
             AnthropicTool(
@@ -435,10 +460,12 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
     /**
      * Converts the framework's CacheControl to Anthropic's cache control format.
      */
-    private fun LLMParams.CacheControl.toAnthropicCacheControl(): AnthropicCacheControl = when (this) {
-        LLMParams.CacheControl.Ephemeral -> AnthropicCacheControl.Ephemeral
-        LLMParams.CacheControl.Extended -> AnthropicCacheControl.Ephemeral // Anthropic only supports ephemeral currently
-    }
+    private fun toAnthropicCacheControl(cacheControl: LLMParams.CacheControl?): AnthropicCacheControl? =
+        when (cacheControl) {
+            LLMParams.CacheControl.Ephemeral -> AnthropicCacheControl.Ephemeral
+            LLMParams.CacheControl.Extended -> AnthropicCacheControl("ephemeral") // Anthropic supports ttl for extended, but using ephemeral for now
+            null -> null
+        }
 
     private fun serializeAnthropicMessageRequest(
         messages: List<AnthropicMessage>,
@@ -486,58 +513,64 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
     }
 
     private fun Message.User.toAnthropicUserMessage(model: LLModel): AnthropicMessage {
-        val listOfContent = buildList {
-            parts.forEach { part ->
-                when (part) {
-                    is ContentPart.Text -> add(AnthropicContent.Text(part.text))
+        val msgCacheControl = toAnthropicCacheControl(metaInfo.cacheControl)
+        val contentList = mutableListOf<AnthropicContent>()
 
-                    is ContentPart.Image -> {
-                        require(model.capabilities.contains(LLMCapability.Vision.Image)) {
-                            "Model ${model.id} does not support images"
-                        }
+        parts.forEachIndexed { index, part ->
+            // Apply cache control to the last content part of the message if set
+            val partCacheControl = if (index == parts.lastIndex) msgCacheControl else null
 
-                        val imageSource: ImageSource = when (val content = part.content) {
-                            is AttachmentContent.URL -> ImageSource.Url(content.url)
-                            is AttachmentContent.Binary -> ImageSource.Base64(content.asBase64(), part.mimeType)
-                            else -> throw LLMClientException(
-                                clientName,
-                                "Unsupported image attachment content: ${content::class}"
-                            )
-                        }
+            when (part) {
+                is ContentPart.Text -> contentList.add(
+                    AnthropicContent.Text(part.text, cacheControl = partCacheControl)
+                )
 
-                        add(AnthropicContent.Image(imageSource))
+                is ContentPart.Image -> {
+                    require(model.capabilities.contains(LLMCapability.Vision.Image)) {
+                        "Model ${model.id} does not support images"
                     }
 
-                    is ContentPart.File -> {
-                        require(model.capabilities.contains(LLMCapability.Document)) {
-                            "Model ${model.id} does not support files"
-                        }
-
-                        val documentSource: DocumentSource = when (val content = part.content) {
-                            is AttachmentContent.URL -> DocumentSource.Url(content.url)
-                            is AttachmentContent.Binary -> DocumentSource.Base64(
-                                content.asBase64(),
-                                part.mimeType
-                            )
-
-                            is AttachmentContent.PlainText -> DocumentSource.PlainText(
-                                content.text,
-                                part.mimeType
-                            )
-                        }
-
-                        add(AnthropicContent.Document(documentSource))
+                    val imageSource: ImageSource = when (val content = part.content) {
+                        is AttachmentContent.URL -> ImageSource.Url(content.url)
+                        is AttachmentContent.Binary -> ImageSource.Base64(content.asBase64(), part.mimeType)
+                        else -> throw LLMClientException(
+                            clientName,
+                            "Unsupported image attachment content: ${content::class}"
+                        )
                     }
 
-                    else -> throw LLMClientException(
-                        clientName,
-                        "Unsupported attachment type: $part"
-                    )
+                    contentList.add(AnthropicContent.Image(imageSource, cacheControl = partCacheControl))
                 }
+
+                is ContentPart.File -> {
+                    require(model.capabilities.contains(LLMCapability.Document)) {
+                        "Model ${model.id} does not support files"
+                    }
+
+                    val documentSource: DocumentSource = when (val content = part.content) {
+                        is AttachmentContent.URL -> DocumentSource.Url(content.url)
+                        is AttachmentContent.Binary -> DocumentSource.Base64(
+                            content.asBase64(),
+                            part.mimeType
+                        )
+
+                        is AttachmentContent.PlainText -> DocumentSource.PlainText(
+                            content.text,
+                            part.mimeType
+                        )
+                    }
+
+                    contentList.add(AnthropicContent.Document(documentSource, cacheControl = partCacheControl))
+                }
+
+                else -> throw LLMClientException(
+                    clientName,
+                    "Unsupported attachment type: $part"
+                )
             }
         }
 
-        return AnthropicMessage.User(content = listOfContent)
+        return AnthropicMessage.User(content = contentList)
     }
 
     private fun processAnthropicResponse(response: AnthropicResponse): List<Message.Response> {
