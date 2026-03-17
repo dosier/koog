@@ -130,7 +130,7 @@ Here is an example of using content moderation with the Llama Guard 3 model thro
 <!--- INCLUDE
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.ollama.client.OllamaClient
-import ai.koog.prompt.llm.OllamaModels
+import ai.koog.prompt.executor.ollama.client.OllamaModels
 import kotlinx.coroutines.runBlocking
 
 fun main() {
@@ -170,7 +170,7 @@ import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
 import ai.koog.prompt.executor.ollama.client.OllamaClient
 import ai.koog.prompt.llm.LLMProvider
-import ai.koog.prompt.llm.OllamaModels
+import ai.koog.prompt.executor.ollama.client.OllamaModels
 import kotlinx.coroutines.runBlocking
 
 const val openAIApiKey = "YOUR_OPENAI_API_KEY"
@@ -427,6 +427,7 @@ OpenAI provides the specific `/moderations` API that provides responses in the f
   }
 }
 ```
+<!--- KNIT example-content-moderation-01.txt -->
 
 In Koog, the structure of the response above maps to the following response:
 <!--- INCLUDE
@@ -497,6 +498,7 @@ ModerationResult(
   "categoryAppliedInputTypes": {}
 }
 ```
+<!--- KNIT example-content-moderation-02.txt -->
 
 In Koog, the OpenAI response above is presented as follows:
 
@@ -543,6 +545,7 @@ For example:
 unsafe
 S1,S10
 ```
+<!--- KNIT example-content-moderation-03.txt -->
 
 This is translated to the following result in Koog:
 
@@ -582,6 +585,7 @@ Here is an example of an Ollama response that marks the content as safe:
 ```text
 safe
 ```
+<!--- KNIT example-content-moderation-04.txt -->
 
 Koog translates the response in the following way:
 

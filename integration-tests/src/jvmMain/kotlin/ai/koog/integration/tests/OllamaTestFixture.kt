@@ -2,7 +2,7 @@ package ai.koog.integration.tests
 
 import ai.koog.prompt.executor.llms.SingleLLMPromptExecutor
 import ai.koog.prompt.executor.ollama.client.OllamaClient
-import ai.koog.prompt.llm.OllamaModels
+import ai.koog.prompt.executor.ollama.client.OllamaModels
 import com.github.dockerjava.api.model.Bind
 import com.github.dockerjava.api.model.Volume
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -41,6 +41,7 @@ class OllamaTestFixture {
     val model = OllamaModels.Meta.LLAMA_3_2
     val visionModel = OllamaModels.Granite.GRANITE_3_2_VISION
     val moderationModel = OllamaModels.Meta.LLAMA_GUARD_3
+    val thinkingModel = OllamaModels.DeepSeek.DEEPSEEK_R1_DISTILL_LLAMA_1_5B
     val modelsWithHallucinations = listOf(OllamaModels.Meta.LLAMA_3_2, OllamaModels.Groq.LLAMA_3_GROK_TOOL_USE_8B)
 
     private lateinit var ollamaContainer: GenericContainer<*>
@@ -68,6 +69,7 @@ class OllamaTestFixture {
                     client.getModelOrNull(model.id, pullIfMissing = true)
                     client.getModelOrNull(visionModel.id, pullIfMissing = true)
                     client.getModelOrNull(moderationModel.id, pullIfMissing = true)
+                    client.getModelOrNull(thinkingModel.id, pullIfMissing = true)
                     modelsWithHallucinations.forEach { client.getModelOrNull(it.id, pullIfMissing = true) }
                 } catch (e: Exception) {
                     logger.error(e) { "Failed to pull models: ${e.message}" }

@@ -24,6 +24,7 @@ import ai.koog.prompt.executor.ollama.client.dto.OllamaShowModelResponseDTO
 import ai.koog.prompt.executor.ollama.client.dto.OllamaToolDTO
 import ai.koog.prompt.executor.ollama.client.dto.OllamaToolDTO.Definition
 import ai.koog.prompt.executor.ollama.client.dto.extractOllamaJsonFormat
+import ai.koog.prompt.executor.ollama.client.dto.generateToolCallId
 import ai.koog.prompt.executor.ollama.client.dto.getToolCalls
 import ai.koog.prompt.executor.ollama.client.dto.toOllamaChatMessages
 import ai.koog.prompt.executor.ollama.client.dto.toOllamaModelCard
@@ -34,9 +35,7 @@ import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.streaming.StreamFrame
-import ai.koog.prompt.streaming.emitAppend
-import ai.koog.prompt.streaming.emitToolCall
-import ai.koog.prompt.streaming.streamFrameFlow
+import ai.koog.prompt.streaming.buildStreamFrameFlow
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -45,19 +44,22 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.get
 import io.ktor.client.request.post
+import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlin.time.Clock
 import kotlinx.serialization.json.Json
 import kotlin.jvm.JvmOverloads
+import kotlin.time.Clock
 
 /**
  * Client for interacting with the Ollama API with comprehensive model support.
@@ -80,7 +82,7 @@ public class OllamaClient @JvmOverloads constructor(
     private val clock: Clock = Clock.System,
     private val contextWindowStrategy: ContextWindowStrategy = ContextWindowStrategy.Companion.None,
     private val toolDescriptorConverter: ToolDescriptorSchemaGenerator = OllamaToolDescriptorSchemaGenerator()
-) : LLMClient, LLMEmbeddingProvider {
+) : LLMClient(), LLMEmbeddingProvider {
 
     private companion object {
         private val logger = KotlinLogging.logger { }
@@ -273,7 +275,7 @@ public class OllamaClient @JvmOverloads constructor(
         prompt: Prompt,
         model: LLModel,
         tools: List<ToolDescriptor>
-    ): Flow<StreamFrame> = streamFrameFlow {
+    ): Flow<StreamFrame> = buildStreamFrameFlow {
         require(model.provider == LLMProvider.Ollama) { "Model not supported by Ollama" }
 
         val request = ollamaJson.encodeToString(
@@ -287,31 +289,40 @@ public class OllamaClient @JvmOverloads constructor(
             )
         )
 
-        val response = client.post(DEFAULT_MESSAGE_PATH) {
+        client.preparePost(DEFAULT_MESSAGE_PATH) {
+            contentType(ContentType.Application.Json)
             setBody(request)
-        }
+        }.execute { response: HttpResponse ->
+            val channel: ByteReadChannel = response.bodyAsChannel()
 
-        val channel = response.bodyAsChannel()
-
-        while (!channel.isClosedForRead) {
-            val line = channel.readUTF8Line() ?: break
-            if (line.isBlank()) continue
-
-            try {
-                val chunk = ollamaJson.decodeFromString<OllamaChatResponseDTO>(line)
-                chunk.message?.let { message ->
-                    emitAppend(message.content)
-                    message.toolCalls?.forEach { toolCall ->
-                        emitToolCall(
-                            id = null,
-                            name = toolCall.function.name,
-                            content = toolCall.function.arguments.toString()
-                        )
+            while (!channel.isClosedForRead) {
+                val line = channel.readUTF8Line() ?: break
+                if (line.isBlank()) continue
+                try {
+                    val chunk = ollamaJson.decodeFromString<OllamaChatResponseDTO>(line)
+                    chunk.message?.let { message ->
+                        if (message.content.isNotEmpty()) {
+                            emitTextDelta(message.content)
+                        }
+                        if (message.thinking.isNullOrEmpty().not()) {
+                            emitReasoningDelta(message.thinking)
+                        }
+                        message.toolCalls?.forEachIndexed { index, toolCall ->
+                            val name = toolCall.function.name
+                            val args = toolCall.function.arguments.toString()
+                            emitToolCallDelta(
+                                id = generateToolCallId(name, args, index),
+                                name = toolCall.function.name,
+                                args = args,
+                                index = index
+                            )
+                            tryEmitPendingToolCall()
+                        }
                     }
+                } catch (_: Exception) {
+                    // Skip malformed JSON lines
+                    continue
                 }
-            } catch (_: Exception) {
-                // Skip malformed JSON lines
-                continue
             }
         }
     }
@@ -337,7 +348,7 @@ public class OllamaClient @JvmOverloads constructor(
     override suspend fun embed(text: String, model: LLModel): List<Double> {
         require(model.provider == LLMProvider.Ollama) { "Model not supported by Ollama" }
 
-        if (!model.capabilities.contains(LLMCapability.Embed)) {
+        if (!model.supports(LLMCapability.Embed)) {
             throw LLMClientException(clientName, "Model ${model.id} does not have the Embed capability")
         }
 
@@ -390,7 +401,7 @@ public class OllamaClient @JvmOverloads constructor(
     }
 
     public override suspend fun moderate(prompt: Prompt, model: LLModel): ModerationResult {
-        if (!model.capabilities.contains(LLMCapability.Moderation)) {
+        if (!model.supports(LLMCapability.Moderation)) {
             throw LLMClientException(clientName, "Model ${model.id} does not support moderation")
         }
 

@@ -25,6 +25,7 @@ export WEAVE_API_KEY="<your-api-key>"
 export WEAVE_ENTITY="<your-entity>"
 export WEAVE_PROJECT_NAME="koog-tracing"
 ```
+<!--- KNIT example-weave-exporter-01.txt -->
 
 ## Configuration
 
@@ -36,7 +37,6 @@ The exporter uses Weave’s OpenTelemetry endpoint via `OtlpHttpSpanExporter`.
 <!--- INCLUDE
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.features.opentelemetry.feature.OpenTelemetry
-import ai.koog.agents.features.opentelemetry.integration.weave.addWeaveExporter
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
 import kotlinx.coroutines.runBlocking
@@ -81,7 +81,6 @@ To make the content available in Weave, use the [setVerbose](opentelemetry-suppo
 <!--- INCLUDE
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.features.opentelemetry.feature.OpenTelemetry
-import ai.koog.agents.features.opentelemetry.integration.weave.addWeaveExporter
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
 

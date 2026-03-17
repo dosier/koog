@@ -9,7 +9,7 @@ import ai.koog.agents.core.agent.execution.path
 import ai.koog.agents.core.agent.session.callTool
 import ai.koog.agents.core.dsl.builder.AIAgentGraphStrategyBuilder
 import ai.koog.agents.core.dsl.builder.AIAgentNodeDelegate
-import ai.koog.agents.core.dsl.builder.forwardTo
+import ai.koog.agents.core.dsl.builder.node
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.dsl.extension.nodeDoNothing
 import ai.koog.agents.core.dsl.extension.nodeExecuteTool
@@ -37,10 +37,14 @@ import ai.koog.agents.snapshot.feature.withPersistence
 import ai.koog.agents.snapshot.providers.InMemoryPersistenceStorageProvider
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.dsl.prompt
-import ai.koog.prompt.llm.OllamaModels
+import ai.koog.prompt.executor.ollama.client.OllamaModels
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.RequestMetaInfo
 import ai.koog.prompt.message.ResponseMetaInfo
+import ai.koog.serialization.JSONPrimitive
+import ai.koog.serialization.kotlinx.KotlinxSerializer
+import ai.koog.serialization.kotlinx.toKoogJSONElement
+import ai.koog.serialization.typeToken
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,21 +54,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runTest
-import kotlin.time.Clock
-import kotlin.time.Clock
-import kotlin.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlin.math.absoluteValue
 import kotlin.random.Random
-import kotlin.reflect.typeOf
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 val databaseMap: MutableMap<String, String> = mutableMapOf()
 
@@ -81,10 +82,12 @@ class CheckpointsTests {
         tool(SayToUser)
     }
 
+    private val serializer = KotlinxSerializer()
+
     @Test
     fun testCheckpointsOneMoreTime() = runTest {
         val agent = AIAgent(
-            promptExecutor = getMockExecutor { },
+            promptExecutor = getMockExecutor(serializer) { },
             strategy = strategy("name") {
                 var loaded = false
                 val node1 by node<String, String> {
@@ -104,7 +107,7 @@ class CheckpointsTests {
                             agentContext = ctx,
                             nodePath = ctx.executionInfo.path(),
                             lastInput = input,
-                            lastInputType = typeOf<String>(),
+                            lastInputType = typeToken<String>(),
                             checkpointId = "cpt-100500",
                             version = 0
                         )
@@ -150,7 +153,7 @@ class CheckpointsTests {
     @Test
     fun testAgentExecutionWithRollback() = runTest {
         val agent = AIAgent(
-            promptExecutor = getMockExecutor { },
+            promptExecutor = getMockExecutor(serializer) { },
             strategy = createCheckpointGraphWithRollback("checkpointId"),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
@@ -222,11 +225,11 @@ class CheckpointsTests {
                 val callID = Random.nextInt().absoluteValue
                 appendPrompt {
                     tool {
-                        call(id = "$callID", tool = WriteKVTool.name, content = WriteKVTool.encodeArgsToString(args))
+                        call(id = "$callID", tool = WriteKVTool.name, content = WriteKVTool.encodeArgsToString(args, serializer))
                         result(
                             id = "$callID",
                             tool = WriteKVTool.name,
-                            content = WriteKVTool.encodeResultToString(result)
+                            content = WriteKVTool.encodeResultToString(result, serializer)
                         )
                     }
                 }
@@ -248,7 +251,7 @@ class CheckpointsTests {
                         ctx,
                         ctx.executionInfo.path(),
                         input,
-                        typeOf<String>(),
+                        typeToken<String>(),
                         checkpointId = checkpointId,
                         version = 0
                     )
@@ -291,7 +294,7 @@ class CheckpointsTests {
     @Test
     fun testAgentRestorationNoCheckpoint() = runTest {
         val agent = AIAgent(
-            promptExecutor = getMockExecutor { },
+            promptExecutor = getMockExecutor(serializer) { },
             strategy = straightForwardGraphNoCheckpoint(),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
@@ -324,7 +327,7 @@ class CheckpointsTests {
         val rollbackConfig = createGraphWithOptionalToolCallAndRollback("ckpt-1")
 
         val agentService: GraphAIAgentService<String, String> = AIAgentService(
-            promptExecutor = getMockExecutor { },
+            promptExecutor = getMockExecutor(serializer) { },
             strategy = rollbackConfig.strategy,
             agentConfig = agentConfig,
             toolRegistry = localToolRegistry
@@ -339,9 +342,10 @@ class CheckpointsTests {
 
         val agent = agentService.createAgent()
 
+        val session = agent.createSession()
         val agentResult = async {
             println("agent.run()")
-            agent.run("Input")
+            session.run("Input")
         }
 
         println("before second launch")
@@ -357,7 +361,7 @@ class CheckpointsTests {
             assertContains(databaseMap, "user-2")
             assertContains(databaseMap, "user-3")
 
-            agent.withPersistence { agent ->
+            session.withPersistence { agent ->
                 println("ctx outside: $this")
                 println("ctx outside [hash]: ${this.hashCode()}")
                 rollbackToCheckpoint("ckpt-1", agent)
@@ -384,13 +388,13 @@ class CheckpointsTests {
     fun testRestoreFromSingleCheckpoint() = runTest {
         val checkpointStorageProvider = InMemoryPersistenceStorageProvider()
         val time = Clock.System.now()
-        val agentId = "testAgentId"
+        val convId = "testAgentId"
 
         val testCheckpoint = AgentCheckpointData(
             checkpointId = "testCheckpointId",
             createdAt = time,
-            nodePath = path(agentId, "straight-forward", "Node2"),
-            lastInput = JsonPrimitive("Test input"),
+            nodePath = path(convId, "straight-forward", "Node2"),
+            lastInput = JSONPrimitive("Test input"),
             messageHistory = listOf(
                 Message.User("User message", metaInfo = RequestMetaInfo(time)),
                 Message.Assistant("Assistant message", metaInfo = ResponseMetaInfo(time))
@@ -398,21 +402,20 @@ class CheckpointsTests {
             version = 0
         )
 
-        checkpointStorageProvider.saveCheckpoint(agentId, testCheckpoint)
+        checkpointStorageProvider.saveCheckpoint(convId, testCheckpoint)
 
         val agent = AIAgent(
-            promptExecutor = getMockExecutor { },
+            promptExecutor = getMockExecutor(serializer) { },
             strategy = straightForwardGraphNoCheckpoint(),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry,
-            id = agentId
         ) {
             install(Persistence) {
                 storage = checkpointStorageProvider
             }
         }
 
-        val output = agent.run("Start the test")
+        val output = agent.run("Start the test", convId)
 
         assertEquals(
             "History: User message\n" +
@@ -426,13 +429,13 @@ class CheckpointsTests {
     fun testRestoreFromLatestCheckpoint() = runTest {
         val checkpointStorageProvider = InMemoryPersistenceStorageProvider()
         val time = Clock.System.now()
-        val agentId = "testAgentId"
+        val sessionId = "testAgentId"
 
         val testCheckpoint2 = AgentCheckpointData(
             checkpointId = "testCheckpointId",
             createdAt = time,
-            nodePath = path(agentId, "straight-forward", "Node1"),
-            lastInput = JsonPrimitive("Test input"),
+            nodePath = path(sessionId, "straight-forward", "Node1"),
+            lastInput = JSONPrimitive("Test input"),
             messageHistory = listOf(
                 Message.User("User message", metaInfo = RequestMetaInfo(time)),
                 Message.Assistant("Assistant message", metaInfo = ResponseMetaInfo(time))
@@ -443,8 +446,8 @@ class CheckpointsTests {
         val testCheckpoint = AgentCheckpointData(
             checkpointId = "testCheckpointId",
             createdAt = time,
-            nodePath = path(agentId, "straight-forward", "Node2"),
-            lastInput = JsonPrimitive("Test input"),
+            nodePath = path(sessionId, "straight-forward", "Node2"),
+            lastInput = JSONPrimitive("Test input"),
             messageHistory = listOf(
                 Message.User("User message", metaInfo = RequestMetaInfo(time)),
                 Message.Assistant("Assistant message", metaInfo = ResponseMetaInfo(time))
@@ -452,22 +455,21 @@ class CheckpointsTests {
             version = testCheckpoint2.version + 1
         )
 
-        checkpointStorageProvider.saveCheckpoint(agentId, testCheckpoint2)
-        checkpointStorageProvider.saveCheckpoint(agentId, testCheckpoint)
+        checkpointStorageProvider.saveCheckpoint(sessionId, testCheckpoint2)
+        checkpointStorageProvider.saveCheckpoint(sessionId, testCheckpoint)
 
         val agent = AIAgent(
-            promptExecutor = getMockExecutor { },
+            promptExecutor = getMockExecutor(serializer) { },
             strategy = straightForwardGraphNoCheckpoint(),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry,
-            id = agentId
         ) {
             install(Persistence) {
                 storage = checkpointStorageProvider
             }
         }
 
-        val output = agent.run("Start the test")
+        val output = agent.run("Start the test", sessionId = sessionId)
 
         assertEquals(
             "History: User message\n" +
@@ -550,13 +552,16 @@ class CheckpointsTests {
         }
     }
 
-    class AskCLIQuestion(val cli: CLI) : SimpleTool<String>(
-        String.serializer(),
+    class AskCLIQuestion(val cli: CLI) : SimpleTool<AskCLIQuestion.Args>(
+        Args.serializer(),
         "ask",
         "prints line in CLI and reads user's response"
     ) {
-        override suspend fun execute(message: String): String {
-            cli.printLN(message)
+        @Serializable
+        data class Args(val message: String)
+
+        override suspend fun execute(args: Args): String {
+            cli.printLN(args.message)
             return cli.readLN()
         }
     }
@@ -596,14 +601,14 @@ class CheckpointsTests {
 
         val tracer = TestTracer()
 
-        val agentService: GraphAIAgentService<String, String> = AIAgentService(
-            promptExecutor = getMockExecutor {
-                mockLLMToolCall(askQuestion, "Is the Earth a sphere?") onRequestEquals "Test my Earth knowledge"
-                mockLLMToolCall(askQuestion, "Why?") onRequestEquals "Yes"
-                mockLLMToolCall(askQuestion, "Why?") onRequestEquals "Yes"
+        val agent = AIAgent(
+            promptExecutor = getMockExecutor(serializer) {
+                mockLLMToolCall(askQuestion, AskCLIQuestion.Args("Is the Earth a sphere?")) onRequestEquals "Test my Earth knowledge"
+                mockLLMToolCall(askQuestion, AskCLIQuestion.Args("Why?")) onRequestEquals "Yes"
+                mockLLMToolCall(askQuestion, AskCLIQuestion.Args("Why?")) onRequestEquals "Yes"
                 mockLLMToolCall(
                     askQuestion,
-                    "Who discovered this?"
+                    AskCLIQuestion.Args("Who discovered this?")
                 ) onRequestEquals "Because when ships sail away, they start to disappear from the bottom"
                 mockLLMAnswer("Excellent job! You are smart") onRequestEquals "Ferdinand Magellan"
             },
@@ -627,7 +632,6 @@ class CheckpointsTests {
         ) {
             install(Persistence) {
                 storage = checkpointStorage
-                enableAutomaticPersistence = true
             }
 
             install(Tracing) {
@@ -635,12 +639,11 @@ class CheckpointsTests {
             }
         }
 
-        val agent = agentService.createAgent()
-
         println("Running agent first time")
 
+        val convId = "my-conv-id"
         val output = runCatching {
-            agent.run("Test my Earth knowledge")
+            agent.run("Test my Earth knowledge", sessionId = convId)
         }.getOrElse { it.message }
 
         println("Finished first run")
@@ -654,26 +657,26 @@ class CheckpointsTests {
                  - exit node: `__start__`
                  - enter node: `callLLM`
                        - LLM call: `Test my Earth knowledge`
-                       - LLM response: `{"__wrapped_value__":"Is the Earth a sphere?"}`
+                       - LLM response: `{"message":"Is the Earth a sphere?"}`
                  - exit node: `callLLM`
                  - enter node: `executeTool`
-                       - tool call: `ask` ({"__wrapped_value__":"Is the Earth a sphere?"})
+                       - tool call: `ask` ({"message":"Is the Earth a sphere?"})
                        - tool result: `ask` == "Yes"
                  - exit node: `executeTool`
                  - enter node: `sendToolResult`
                        - LLM call: `Yes`
-                       - LLM response: `{"__wrapped_value__":"Why?"}`
+                       - LLM response: `{"message":"Why?"}`
                  - exit node: `sendToolResult`
                  - enter node: `executeTool`
-                       - tool call: `ask` ({"__wrapped_value__":"Why?"})
+                       - tool call: `ask` ({"message":"Why?"})
                        - tool result: `ask` == "Because when ships sail away, they start to disappear from the bottom"
                  - exit node: `executeTool`
                  - enter node: `sendToolResult`
                        - LLM call: `Because when ships sail away, they start to disappear from the bottom`
-                       - LLM response: `{"__wrapped_value__":"Who discovered this?"}`
+                       - LLM response: `{"message":"Who discovered this?"}`
                  - exit node: `sendToolResult`
                  - enter node: `executeTool`
-                       - tool call: `ask` ({"__wrapped_value__":"Who discovered this?"})
+                       - tool call: `ask` ({"message":"Who discovered this?"})
                        - tool result: `ask` == "Ferdinand Magellan"
                  - exit node: `executeTool`
                  - enter node: `nodeThrow`
@@ -681,7 +684,7 @@ class CheckpointsTests {
             tracer.traceAsString().trimIndent()
         )
 
-        val lastCheckpoint = checkpointStorage.getLatestCheckpoint(agent.id)!!
+        val lastCheckpoint = checkpointStorage.getLatestCheckpoint(convId)!!
         val lastMessageHistory = lastCheckpoint.messageHistory.joinToString("\n") { msg ->
             when (msg) {
                 is Message.System -> "- system: ${msg.content}"
@@ -695,13 +698,13 @@ class CheckpointsTests {
 
         assertEquals(
             """
-              - system: You are a test agent.
-              - user: Test my Earth knowledge
-              - tool call `ask` ({"__wrapped_value__":"Is the Earth a sphere?"})
-              - tool result `ask` == Yes
-              - tool call `ask` ({"__wrapped_value__":"Why?"})
-              - tool result `ask` == Because when ships sail away, they start to disappear from the bottom
-              - tool call `ask` ({"__wrapped_value__":"Who discovered this?"})
+                - system: You are a test agent.
+                - user: Test my Earth knowledge
+                - tool call `ask` ({"message":"Is the Earth a sphere?"})
+                - tool result `ask` == Yes
+                - tool call `ask` ({"message":"Why?"})
+                - tool result `ask` == Because when ships sail away, they start to disappear from the bottom
+                - tool call `ask` ({"message":"Who discovered this?"})
             """.trimIndent(),
             lastMessageHistory
         )
@@ -720,13 +723,13 @@ class CheckpointsTests {
         isFirstRun = false
         tracer.clear()
 
-        val output2 = agentService.createAgentAndRun("Test my Earth knowledge", id = agent.id)
+        val output2 = agent.run("Test my Earth knowledge", convId)
 
         println("Finished second run")
 
         assertEquals("Excellent job! You are smart", output2)
 
-        // EXPECT THAT "tool call: `ask` ({"__wrapped_value__":"Who discovered this?"})" WILL NOT HAPPEN TWICE!!!!!!!
+        // EXPECT THAT "tool call: `ask` ({"message":"Who discovered this?"})" WILL NOT HAPPEN TWICE!!!!!!!
         assertEquals(
             """
                 Trace:
@@ -761,6 +764,7 @@ class CheckpointsTests {
             tool(askQuestion)
         }
 
+        val convId = "my-conv-id"
         var counter = 0
         var isFirstRun = true
 
@@ -770,14 +774,14 @@ class CheckpointsTests {
 
         val tracer = TestTracer()
 
-        val agentService: GraphAIAgentService<String, String> = AIAgentService(
-            promptExecutor = getMockExecutor {
-                mockLLMToolCall(askQuestion, "Is the Earth a sphere?") onRequestEquals "Test my Earth knowledge"
-                mockLLMToolCall(askQuestion, "Why?") onRequestEquals "Yes"
-                mockLLMToolCall(askQuestion, "Why?") onRequestEquals "Yes"
+        val agent = AIAgent(
+            promptExecutor = getMockExecutor(serializer) {
+                mockLLMToolCall(askQuestion, AskCLIQuestion.Args("Is the Earth a sphere?")) onRequestEquals "Test my Earth knowledge"
+                mockLLMToolCall(askQuestion, AskCLIQuestion.Args("Why?")) onRequestEquals "Yes"
+                mockLLMToolCall(askQuestion, AskCLIQuestion.Args("Why?")) onRequestEquals "Yes"
                 mockLLMToolCall(
                     askQuestion,
-                    "Who discovered this?"
+                    AskCLIQuestion.Args("Who discovered this?")
                 ) onRequestEquals "Because when ships sail away, they start to disappear from the bottom"
                 mockLLMAnswer("Excellent job! You are smart") onRequestEquals "Ferdinand Magellan"
             },
@@ -801,7 +805,6 @@ class CheckpointsTests {
         ) {
             install(Persistence) {
                 storage = checkpointStorage
-                enableAutomaticPersistence = true
             }
 
             install(Tracing) {
@@ -809,12 +812,10 @@ class CheckpointsTests {
             }
         }
 
-        val agent = agentService.createAgent()
-
         println("Running agent first time")
 
         val output = runCatching {
-            agent.run("Test my Earth knowledge")
+            agent.run("Test my Earth knowledge", sessionId = convId)
         }.getOrElse { it.message }
 
         println("Finished first run")
@@ -828,26 +829,26 @@ class CheckpointsTests {
                  - exit node: `__start__`
                  - enter node: `callLLM`
                        - LLM call: `Test my Earth knowledge`
-                       - LLM response: `{"__wrapped_value__":"Is the Earth a sphere?"}`
+                       - LLM response: `{"message":"Is the Earth a sphere?"}`
                  - exit node: `callLLM`
                  - enter node: `executeTool`
-                       - tool call: `ask` ({"__wrapped_value__":"Is the Earth a sphere?"})
+                       - tool call: `ask` ({"message":"Is the Earth a sphere?"})
                        - tool result: `ask` == "Yes"
                  - exit node: `executeTool`
                  - enter node: `sendToolResult`
                        - LLM call: `Yes`
-                       - LLM response: `{"__wrapped_value__":"Why?"}`
+                       - LLM response: `{"message":"Why?"}`
                  - exit node: `sendToolResult`
                  - enter node: `executeTool`
-                       - tool call: `ask` ({"__wrapped_value__":"Why?"})
+                       - tool call: `ask` ({"message":"Why?"})
                        - tool result: `ask` == "Because when ships sail away, they start to disappear from the bottom"
                  - exit node: `executeTool`
                  - enter node: `sendToolResult`
                        - LLM call: `Because when ships sail away, they start to disappear from the bottom`
-                       - LLM response: `{"__wrapped_value__":"Who discovered this?"}`
+                       - LLM response: `{"message":"Who discovered this?"}`
                  - exit node: `sendToolResult`
                  - enter node: `executeTool`
-                       - tool call: `ask` ({"__wrapped_value__":"Who discovered this?"})
+                       - tool call: `ask` ({"message":"Who discovered this?"})
                        - tool result: `ask` == "Ferdinand Magellan"
                  - exit node: `executeTool`
                  - enter node: `nodeThrow`
@@ -855,7 +856,7 @@ class CheckpointsTests {
             tracer.traceAsString().trimIndent()
         )
 
-        val lastCheckpoint = checkpointStorage.getLatestCheckpoint(agent.id)!!
+        val lastCheckpoint = checkpointStorage.getLatestCheckpoint(convId)!!
         val lastMessageHistory = lastCheckpoint.messageHistory.joinToString("\n") { msg ->
             when (msg) {
                 is Message.System -> "- system: ${msg.content}"
@@ -869,13 +870,13 @@ class CheckpointsTests {
 
         assertEquals(
             """
-              - system: You are a test agent.
-              - user: Test my Earth knowledge
-              - tool call `ask` ({"__wrapped_value__":"Is the Earth a sphere?"})
-              - tool result `ask` == Yes
-              - tool call `ask` ({"__wrapped_value__":"Why?"})
-              - tool result `ask` == Because when ships sail away, they start to disappear from the bottom
-              - tool call `ask` ({"__wrapped_value__":"Who discovered this?"})
+                - system: You are a test agent.
+                - user: Test my Earth knowledge
+                - tool call `ask` ({"message":"Is the Earth a sphere?"})
+                - tool result `ask` == Yes
+                - tool call `ask` ({"message":"Why?"})
+                - tool result `ask` == Because when ships sail away, they start to disappear from the bottom
+                - tool call `ask` ({"message":"Who discovered this?"})
             """.trimIndent(),
             lastMessageHistory
         )
@@ -890,10 +891,10 @@ class CheckpointsTests {
                     Message.Tool.Call(
                         id = "call-1",
                         tool = "ask",
-                        content = "{\"__wrapped_value__\":\"Who discovered this?\"}",
+                        content = "{\"message\":\"Who discovered this?\"}",
                         metaInfo = ResponseMetaInfo(timestamp = Instant.parse("2023-01-02T22:35:01+01:00"))
                     )
-                )
+                ).toKoogJSONElement()
             )
         )
 
@@ -913,18 +914,18 @@ class CheckpointsTests {
         isFirstRun = false
         tracer.clear()
 
-        val output2 = agentService.createAgentAndRun("Test my Earth knowledge", id = agent.id)
+        val output2 = agent.run("Test my Earth knowledge", sessionId = agent.id)
 
         println("Finished second run")
 
         assertEquals("Excellent job! You are smart", output2)
 
-        // EXPECT THAT "tool call: `ask` ({"__wrapped_value__":"Who discovered this?"})" will be re-executed (because we saved nodeInput in the checkpoint)
+        // EXPECT THAT "tool call: `ask` ({"message":"Who discovered this?"})" will be re-executed (because we saved nodeInput in the checkpoint)
         assertEquals(
             """
                 Trace:
                  - enter node: `executeTool`
-                       - tool call: `ask` ({"__wrapped_value__":"Who discovered this?"})
+                       - tool call: `ask` ({"message":"Who discovered this?"})
                        - tool result: `ask` == "Ferdinand Magellan"
                  - exit node: `executeTool`
                  - enter node: `sendToolResult`

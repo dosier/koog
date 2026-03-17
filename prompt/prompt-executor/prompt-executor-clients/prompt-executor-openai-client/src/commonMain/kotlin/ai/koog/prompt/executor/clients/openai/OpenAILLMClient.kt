@@ -9,6 +9,7 @@ import ai.koog.prompt.executor.clients.ConnectionTimeoutConfig
 import ai.koog.prompt.executor.clients.LLMClient
 import ai.koog.prompt.executor.clients.LLMClientException
 import ai.koog.prompt.executor.clients.LLMEmbeddingProvider
+import ai.koog.prompt.executor.clients.modelsById
 import ai.koog.prompt.executor.clients.openai.base.AbstractOpenAILLMClient
 import ai.koog.prompt.executor.clients.openai.base.OpenAIBaseSettings
 import ai.koog.prompt.executor.clients.openai.base.OpenAICompatibleToolDescriptorSchemaGenerator
@@ -19,6 +20,7 @@ import ai.koog.prompt.executor.clients.openai.base.models.OpenAIContentPart
 import ai.koog.prompt.executor.clients.openai.base.models.OpenAIMessage
 import ai.koog.prompt.executor.clients.openai.base.models.OpenAIModalities
 import ai.koog.prompt.executor.clients.openai.base.models.OpenAIStaticContent
+import ai.koog.prompt.executor.clients.openai.base.models.OpenAIStreamOptions
 import ai.koog.prompt.executor.clients.openai.base.models.OpenAITool
 import ai.koog.prompt.executor.clients.openai.base.models.OpenAIToolChoice
 import ai.koog.prompt.executor.clients.openai.models.InputContent
@@ -50,7 +52,8 @@ import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.streaming.StreamFrame
-import ai.koog.prompt.streaming.StreamFrameFlowBuilder
+import ai.koog.prompt.streaming.buildStreamFrameFlow
+import ai.koog.prompt.streaming.requireEndFrame
 import ai.koog.utils.io.SuitableForIO
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
@@ -62,9 +65,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.withContext
-import kotlin.time.Clock
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.jvm.JvmOverloads
+import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import ai.koog.prompt.executor.clients.openai.base.models.Content as OpenAIContent
@@ -145,6 +148,11 @@ public open class OpenAILLMClient @JvmOverloads constructor(
         }
 
         val responseFormat = createResponseFormat(chatParams.schema, model)
+        val streamOptions = if (stream) {
+            OpenAIStreamOptions(includeUsage = true)
+        } else {
+            null
+        }
 
         val request = OpenAIChatCompletionRequest(
             messages = messages,
@@ -167,6 +175,7 @@ public open class OpenAILLMClient @JvmOverloads constructor(
             stop = chatParams.stop,
             store = chatParams.store,
             stream = stream,
+            streamOptions = streamOptions,
             temperature = chatParams.temperature,
             toolChoice = toolChoice,
             tools = tools,
@@ -189,7 +198,7 @@ public open class OpenAILLMClient @JvmOverloads constructor(
         stream: Boolean
     ): String {
         val responseFormat = params.schema?.let { schema ->
-            require(schema.capability in model.capabilities) {
+            require(model.supports(schema.capability)) {
                 "Model ${model.id} does not support structured output schema ${schema.name}"
             }
             when (schema) {
@@ -233,11 +242,6 @@ public open class OpenAILLMClient @JvmOverloads constructor(
 
     private companion object {
         private val staticLogger = KotlinLogging.logger { }
-
-        init {
-            // On class load register custom OpenAI JSON schema generators for structured output.
-            registerOpenAIJsonSchemaGenerators(LLMProvider.OpenAI)
-        }
     }
 
     override fun processProviderChatResponse(response: OpenAIChatCompletionResponse): List<LLMChoice> {
@@ -256,18 +260,31 @@ public open class OpenAILLMClient @JvmOverloads constructor(
     override fun decodeResponse(data: String): OpenAIChatCompletionResponse =
         json.decodeFromString(data)
 
-    override suspend fun StreamFrameFlowBuilder.processStreamingChunk(chunk: OpenAIChatCompletionStreamResponse) {
-        chunk.choices.firstOrNull()?.let { choice ->
-            choice.delta.content?.let { emitAppend(it) }
-            choice.delta.toolCalls?.forEach { openAIToolCall ->
-                val index = openAIToolCall.index
-                val id = openAIToolCall.id
-                val functionName = openAIToolCall.function?.name
-                val functionArgs = openAIToolCall.function?.arguments
-                upsertToolCall(index, id, functionName, functionArgs)
+    override fun processStreamingResponse(
+        response: Flow<OpenAIChatCompletionStreamResponse>
+    ): Flow<StreamFrame> = buildStreamFrameFlow {
+        var finishReason: String? = null
+        var metaInfo: ResponseMetaInfo? = null
+
+        response.collect { chunk ->
+            chunk.choices.firstOrNull()?.let { choice ->
+                choice.delta.content?.let { emitTextDelta(it, choice.index) }
+
+                choice.delta.toolCalls?.forEach { openAIToolCall ->
+                    val index = openAIToolCall.index
+                    val id = openAIToolCall.id
+                    val functionName = openAIToolCall.function?.name
+                    val functionArgs = openAIToolCall.function?.arguments
+                    emitToolCallDelta(id, functionName, functionArgs, index)
+                }
+
+                choice.finishReason?.let { finishReason = it }
             }
-            choice.finishReason?.let { emitEnd(it, createMetaInfo(chunk.usage)) }
+
+            chunk.usage?.let { metaInfo = createMetaInfo(it) }
         }
+
+        emitEnd(finishReason, metaInfo)
     }
 
     override suspend fun execute(prompt: Prompt, model: LLModel, tools: List<ToolDescriptor>): List<Message.Response> {
@@ -328,9 +345,41 @@ public open class OpenAILLMClient @JvmOverloads constructor(
                 decodeStreamingResponse = { json.decodeFromString<OpenAIStreamEvent>(it) },
                 processStreamingChunk = {
                     when (it) {
+                        is OpenAIStreamEvent.ResponseOutputTextDelta -> {
+                            StreamFrame.TextDelta(text = it.delta, index = it.outputIndex)
+                        }
+
+                        is OpenAIStreamEvent.ResponseReasoningTextDelta -> {
+                            StreamFrame.ReasoningDelta(text = it.delta, index = it.outputIndex)
+                        }
+
+                        is OpenAIStreamEvent.ResponseReasoningSummaryTextDelta -> {
+                            StreamFrame.ReasoningDelta(summary = it.delta, index = it.outputIndex)
+                        }
+
+                        is OpenAIStreamEvent.ResponseFunctionCallArgumentsDelta -> {
+                            StreamFrame.ToolCallDelta(id = it.itemId, name = null, content = it.delta, index = it.outputIndex)
+                        }
+
                         is OpenAIStreamEvent.ResponseOutputItemDone -> {
                             when (val item = it.item) {
-                                is Item.FunctionToolCall -> StreamFrame.ToolCall(item.id, item.name, item.arguments)
+                                is Item.Text -> StreamFrame.TextComplete(item.value, it.outputIndex)
+                                is Item.Reasoning -> {
+                                    StreamFrame.ReasoningComplete(
+                                        text = item.content?.map { content -> content.text } ?: emptyList(),
+                                        summary = item.summary.map { content -> content.text },
+                                        encrypted = item.encryptedContent,
+                                        index = it.outputIndex
+                                    )
+                                }
+
+                                is Item.FunctionToolCall -> StreamFrame.ToolCallComplete(
+                                    id = item.id,
+                                    name = item.name,
+                                    content = item.arguments,
+                                    index = it.outputIndex
+                                )
+
                                 else -> null
                             }
                         }
@@ -349,14 +398,10 @@ public open class OpenAILLMClient @JvmOverloads constructor(
                             )
                         }
 
-                        is OpenAIStreamEvent.ResponseOutputTextDelta -> {
-                            StreamFrame.Append(it.delta)
-                        }
-
                         else -> null
                     }
                 }
-            ).filterNotNull()
+            ).filterNotNull().requireEndFrame()
         } catch (e: Exception) {
             throw LLMClientException(
                 clientName = clientName,
@@ -521,25 +566,17 @@ public open class OpenAILLMClient @JvmOverloads constructor(
      *
      * @return A list of model identifiers available from OpenAI.
      */
-    override suspend fun models(): List<String> {
+    override suspend fun models(): List<LLModel> {
         logger.debug { "Fetching available models from OpenAI" }
 
-        val openAIResponse = try {
-            httpClient.get(
-                path = settings.modelsPath,
-                responseType = OpenAIModelsResponse::class
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            throw LLMClientException(
-                clientName = clientName,
-                message = e.message,
-                cause = e
-            )
-        }
+        val models = httpClient.get(
+            path = settings.modelsPath,
+            responseType = OpenAIModelsResponse::class
+        )
 
-        return openAIResponse.data.map { it.id }
+        val modelsById = OpenAIModels.modelsById()
+
+        return models.data.map { modelsById[it.id] ?: LLModel(provider = llmProvider(), id = it.id) }
     }
 
     private fun convertModerationResult(result: OpenAIModerationResult): ModerationResult {
@@ -777,7 +814,10 @@ public open class OpenAILLMClient @JvmOverloads constructor(
                         add(InputContent.File(fileData = fileData, fileUrl = fileUrl, filename = part.fileName))
                     }
 
-                    else -> throw LLMClientException(clientName, "Unsupported attachment type: $part, for model: $model with Responses API")
+                    else -> throw LLMClientException(
+                        clientName,
+                        "Unsupported attachment type: $part, for model: $model with Responses API"
+                    )
                 }
             }
         }
@@ -822,7 +862,10 @@ public open class OpenAILLMClient @JvmOverloads constructor(
                         metaInfo = metaInfo
                     )
 
-                    else -> throw LLMClientException(clientName, "Unexpected response from $clientName: no tool calls and no content")
+                    else -> throw LLMClientException(
+                        clientName,
+                        "Unexpected response from $clientName: no tool calls and no content"
+                    )
                 }
             }
     }

@@ -5,8 +5,6 @@ import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.RequestMetaInfo
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
-import kotlin.time.Clock
-import kotlin.time.Instant
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -19,6 +17,8 @@ import org.junit.jupiter.params.provider.MethodSource
 import java.util.stream.Stream
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 class PromptTest {
     companion object {
@@ -420,7 +420,7 @@ class PromptTest {
 
     @Test
     fun testInvalidToolCallJsonContent() {
-        // contentJson property is now on StreamFrame.ToolCall, not Message.Tool.Call
+        // contentJson property is now on StreamFrame.ToolCallComplete, not Message.Tool.Call
         // This test is no longer applicable for Message.Tool.Call
         val toolCallWithInvalidJson = Message.Tool.Call(toolCallId, toolName, "invalid json", testRespMetaInfo)
         // Just verify the content is stored as-is

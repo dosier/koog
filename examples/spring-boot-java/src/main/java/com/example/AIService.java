@@ -27,6 +27,7 @@ record AIService(
 
     Mono<String> generateResponse(String input) {
 
+
         RequestMetaInfo metaInfo = RequestMetaInfo.Companion.create(clock);
         final var systemPrompt = new Message.System("You are a helpful pirate", metaInfo);
         final var userPrompt = new Message.User(input, metaInfo);
@@ -38,11 +39,11 @@ record AIService(
         );
 
         return Mono.fromFuture(
-            executor.executeAsync(prompt, OpenAIModels.CostOptimized.INSTANCE.getGPT4_1Nano())
-                .handle((responses, thowable) -> {
-                        if (thowable != null) {
-                            log.error("Error executing prompt", thowable);
-                            return "Error: " + thowable.getMessage();
+            executor.executeAsync(prompt, OpenAIModels.Chat.INSTANCE.getGPT4_1Nano())
+                .handle((responses, throwable) -> {
+                        if (throwable != null) {
+                            log.error("Error executing prompt", throwable);
+                            return "Error: " + throwable.getMessage();
                         } else {
                             return responses.stream()
                                 .map(Response::getContent)

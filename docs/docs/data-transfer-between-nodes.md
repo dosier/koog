@@ -69,6 +69,7 @@ To save data using a created storage key, use the `storage.set(key: AIAgentStora
 
 <!--- INCLUDE
 import ai.koog.agents.core.dsl.builder.strategy
+import ai.koog.agents.core.dsl.builder.node
 import ai.koog.agents.core.agent.entity.createStorageKey
 
 class UserData(
@@ -99,6 +100,7 @@ To retrieve the data, use the `storage.get` method in a node:
 <!--- INCLUDE
 import ai.koog.agents.core.agent.entity.createStorageKey
 import ai.koog.agents.core.dsl.builder.strategy
+import ai.koog.agents.core.dsl.builder.node
 
 class UserData(
     val name: String,
@@ -125,17 +127,17 @@ val nodeRetrieveData by node<String, Unit> { message ->
 
 ## API documentation
 
-For a complete reference related to the `AIAgentStorage` class, see [AIAgentStorage](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.agent.entity/-a-i-agent-storage/index.html).
+For a complete reference related to the `AIAgentStorage` class, see [AIAgentStorage](api:agents-core::ai.koog.agents.core.agent.entity.AIAgentStorage).
 
 For individual functions available in the `AIAgentStorage` class, see the following API references:
 
-- [clear](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.agent.entity/-a-i-agent-storage/clear.html)
-- [get](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.agent.entity/-a-i-agent-storage/get.html)
-- [getValue](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.agent.entity/-a-i-agent-storage/get-value.html)
-- [putAll](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.agent.entity/-a-i-agent-storage/put-all.html)
-- [remove](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.agent.entity/-a-i-agent-storage/remove.html)
-- [set](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.agent.entity/-a-i-agent-storage/set.html)
-- [toMap](https://api.koog.ai/agents/agents-core/ai.koog.agents.core.agent.entity/-a-i-agent-storage/to-map.html)
+- [clear](api:agents-core::ai.koog.agents.core.agent.entity.AIAgentStorage.clear)
+- [get](api:agents-core::ai.koog.agents.core.agent.entity.AIAgentStorage.get)
+- [getValue](api:agents-core::ai.koog.agents.core.agent.entity.AIAgentStorage.getValue)
+- [putAll](api:agents-core::ai.koog.agents.core.agent.entity.AIAgentStorage.putAll)
+- [remove](api:agents-core::ai.koog.agents.core.agent.entity.AIAgentStorage.remove)
+- [set](api:agents-core::ai.koog.agents.core.agent.entity.AIAgentStorage.set)
+- [toMap](api:agents-core::ai.koog.agents.core.agent.entity.AIAgentStorage.toMap)
 
 ## Additional information
 

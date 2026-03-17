@@ -19,6 +19,7 @@ This can be done by providing them as parameters to the `addLangfuseExporter()` 
    export LANGFUSE_PUBLIC_KEY="<your-public-key>"
    export LANGFUSE_SECRET_KEY="<your-secret-key>"
 ```
+<!--- KNIT example-langfuse-exporter-01.txt -->
 
 ## Configuration
 
@@ -30,7 +31,6 @@ The exporter uses `OtlpHttpSpanExporter` under the hood to send traces to Langfu
 <!--- INCLUDE
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.features.opentelemetry.feature.OpenTelemetry
-import ai.koog.agents.features.opentelemetry.integration.langfuse.addLangfuseExporter
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
 import kotlinx.coroutines.runBlocking
@@ -77,7 +77,6 @@ Common attributes:
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.features.opentelemetry.attribute.CustomAttribute
 import ai.koog.agents.features.opentelemetry.feature.OpenTelemetry
-import ai.koog.agents.features.opentelemetry.integration.langfuse.addLangfuseExporter
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
 import kotlinx.coroutines.runBlocking
@@ -127,7 +126,6 @@ To make the content available in Langfuse, use the [setVerbose](opentelemetry-su
 <!--- INCLUDE
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.features.opentelemetry.feature.OpenTelemetry
-import ai.koog.agents.features.opentelemetry.integration.langfuse.addLangfuseExporter
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
 

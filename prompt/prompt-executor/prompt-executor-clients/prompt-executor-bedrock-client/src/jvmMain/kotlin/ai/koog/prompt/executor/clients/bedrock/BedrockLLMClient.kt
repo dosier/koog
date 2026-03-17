@@ -11,8 +11,6 @@ import ai.koog.prompt.executor.clients.LLMClientException
 import ai.koog.prompt.executor.clients.LLMEmbeddingProvider
 import ai.koog.prompt.executor.clients.bedrock.converse.BedrockConverseConverters
 import ai.koog.prompt.executor.clients.bedrock.modelfamilies.BedrockAnthropicInvokeModel
-import ai.koog.prompt.executor.clients.bedrock.modelfamilies.ai21.BedrockAI21JambaSerialization
-import ai.koog.prompt.executor.clients.bedrock.modelfamilies.ai21.JambaRequest
 import ai.koog.prompt.executor.clients.bedrock.modelfamilies.amazon.BedrockAmazonNovaSerialization
 import ai.koog.prompt.executor.clients.bedrock.modelfamilies.amazon.BedrockAmazonTitanEmbeddingSerialization
 import ai.koog.prompt.executor.clients.bedrock.modelfamilies.amazon.NovaRequest
@@ -59,9 +57,9 @@ import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.withContext
-import kotlin.time.Clock
 import kotlinx.serialization.json.Json
 import org.jetbrains.annotations.VisibleForTesting
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
@@ -141,7 +139,7 @@ public class BedrockLLMClient @JvmOverloads constructor(
     private val moderationGuardrailsSettings: BedrockGuardrailsSettings? = null,
     private val fallbackModelFamily: BedrockModelFamilies? = null,
     private val clock: Clock = Clock.System,
-) : LLMClient, LLMEmbeddingProvider {
+) : LLMClient(), LLMEmbeddingProvider {
 
     private val logger = KotlinLogging.logger {}
 
@@ -212,13 +210,13 @@ public class BedrockLLMClient @JvmOverloads constructor(
 
             model.id.contains("amazon.nova") -> BedrockModelFamilies.AmazonNova
 
-            model.id.contains("ai21.jamba") -> BedrockModelFamilies.AI21Jamba
-
             model.id.contains("meta.llama") -> BedrockModelFamilies.Meta
 
             model.id.contains("amazon.titan") -> BedrockModelFamilies.TitanEmbedding
 
             model.id.contains("cohere.embed") -> BedrockModelFamilies.Cohere
+
+            model.id.contains("moonshot.kimi") -> BedrockModelFamilies.MoonshotKimi
 
             else -> {
                 if (fallbackModelFamily != null) {
@@ -242,7 +240,7 @@ public class BedrockLLMClient @JvmOverloads constructor(
 
         model.requireCapability(LLMCapability.Completion, "Model ${model.id} does not support chat completions")
         // Check tool support
-        if (tools.isNotEmpty() && !model.capabilities.contains(LLMCapability.Tools)) {
+        if (tools.isNotEmpty() && !model.supports(LLMCapability.Tools)) {
             throw LLMClientException(clientName, "Model ${model.id} does not support tools")
         }
 
@@ -281,11 +279,6 @@ public class BedrockLLMClient @JvmOverloads constructor(
                     throw exception
                 }
                 return@withContext when (modelFamily) {
-                    is BedrockModelFamilies.AI21Jamba -> BedrockAI21JambaSerialization.parseJambaResponse(
-                        responseBodyString,
-                        clock
-                    )
-
                     is BedrockModelFamilies.AmazonNova -> BedrockAmazonNovaSerialization.parseNovaResponse(
                         responseBodyString,
                         clock
@@ -299,6 +292,12 @@ public class BedrockLLMClient @JvmOverloads constructor(
                     is BedrockModelFamilies.Meta -> BedrockMetaLlamaSerialization.parseLlamaResponse(
                         responseBodyString,
                         clock
+                    )
+
+                    is BedrockModelFamilies.MoonshotKimi -> throw LLMClientException(
+                        clientName,
+                        "Model family ${modelFamily.display} requires the Bedrock Converse API. " +
+                            "Please configure BedrockClientSettings with apiMethod = BedrockAPIMethod.Converse"
                     )
 
                     is BedrockModelFamilies.TitanEmbedding, is BedrockModelFamilies.Cohere -> throw LLMClientException(
@@ -357,7 +356,7 @@ public class BedrockLLMClient @JvmOverloads constructor(
 
         model.requireCapability(LLMCapability.Completion, "Model ${model.id} does not support chat completions")
         // Check tool support
-        if (tools.isNotEmpty() && !model.capabilities.contains(LLMCapability.Tools)) {
+        if (tools.isNotEmpty() && !model.supports(LLMCapability.Tools)) {
             throw LLMClientException(clientName, "Model ${model.id} does not support tools")
         }
 
@@ -419,11 +418,6 @@ public class BedrockLLMClient @JvmOverloads constructor(
             it.isBlank()
         }.run {
             when (modelFamily) {
-                is BedrockModelFamilies.AI21Jamba -> genericProcessStream(
-                    this,
-                    BedrockAI21JambaSerialization::parseJambaStreamChunk
-                )
-
                 is BedrockModelFamilies.AmazonNova -> genericProcessStream(
                     this,
                     BedrockAmazonNovaSerialization::parseNovaStreamChunk
@@ -437,6 +431,12 @@ public class BedrockLLMClient @JvmOverloads constructor(
                 is BedrockModelFamilies.AnthropicClaude -> BedrockAnthropicClaudeSerialization.transformAnthropicStreamChunks(
                     chunkJsonStringFlow = this,
                     clock = clock,
+                )
+
+                is BedrockModelFamilies.MoonshotKimi -> throw LLMClientException(
+                    clientName,
+                    "Model family ${modelFamily.display} requires the Bedrock Converse API. " +
+                        "Please configure BedrockClientSettings with apiMethod = BedrockAPIMethod.Converse"
                 )
 
                 is BedrockModelFamilies.TitanEmbedding, is BedrockModelFamilies.Cohere ->
@@ -555,11 +555,6 @@ public class BedrockLLMClient @JvmOverloads constructor(
             "This function must only be used with completion-capable models."
         )
         return when (getBedrockModelFamily(model)) {
-            is BedrockModelFamilies.AI21Jamba -> json.encodeToString(
-                JambaRequest.serializer(),
-                BedrockAI21JambaSerialization.createJambaRequest(prompt, model, tools)
-            )
-
             is BedrockModelFamilies.AmazonNova -> json.encodeToString(
                 NovaRequest.serializer(),
                 BedrockAmazonNovaSerialization.createNovaRequest(prompt, model, tools)
@@ -575,6 +570,12 @@ public class BedrockLLMClient @JvmOverloads constructor(
             is BedrockModelFamilies.Meta -> json.encodeToString(
                 LlamaRequest.serializer(),
                 BedrockMetaLlamaSerialization.createLlamaRequest(prompt, model)
+            )
+
+            is BedrockModelFamilies.MoonshotKimi -> throw LLMClientException(
+                clientName,
+                "Model family ${getBedrockModelFamily(model).display} requires the Bedrock Converse API. " +
+                    "Please configure BedrockClientSettings with apiMethod = BedrockAPIMethod.Converse"
             )
 
             is BedrockModelFamilies.TitanEmbedding,
@@ -610,7 +611,7 @@ public class BedrockLLMClient @JvmOverloads constructor(
         }
 
     private fun LLModel.requireCapability(capability: LLMCapability, message: String? = null) {
-        require(capabilities.contains(capability)) {
+        require(supports(capability)) {
             "Model $id does not support ${capability.id}" + (message?.let { ": $it" } ?: "")
         }
     }

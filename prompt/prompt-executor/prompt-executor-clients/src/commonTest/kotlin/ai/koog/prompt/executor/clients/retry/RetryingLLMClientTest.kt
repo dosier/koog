@@ -11,8 +11,9 @@ import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
+import ai.koog.prompt.streaming.IncompleteStreamException
 import ai.koog.prompt.streaming.StreamFrame
-import ai.koog.prompt.streaming.emitAppend
+import ai.koog.prompt.streaming.emitTextDelta
 import ai.koog.prompt.streaming.streamFrameFlow
 import ai.koog.prompt.streaming.streamFrameFlowOf
 import kotlinx.coroutines.CancellationException
@@ -22,11 +23,11 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
-import kotlin.time.Clock
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
 
 class RetryingLLMClientTest {
@@ -278,7 +279,7 @@ class RetryingLLMClientTest {
 
         val result = retryingClient.executeStreaming(testPrompt, testModel).toList()
 
-        assertEquals(listOf("chunk1", "chunk2").map(StreamFrame::Append), result)
+        assertEquals(listOf("chunk1", "chunk2").map(StreamFrame::TextDelta), result)
         assertEquals(1, mockClient.streamCalls)
     }
 
@@ -300,7 +301,7 @@ class RetryingLLMClientTest {
 
         val result = retryingClient.executeStreaming(testPrompt, testModel).toList()
 
-        assertEquals(listOf("chunk1", "chunk2").map(StreamFrame::Append), result)
+        assertEquals(listOf("chunk1", "chunk2").map(StreamFrame::TextDelta), result)
         assertEquals(2, mockClient.streamCalls)
     }
 
@@ -309,7 +310,7 @@ class RetryingLLMClientTest {
         // Mock that emits one token then fails
         val mockClient = MockLLMClient(
             streamResponse = streamFrameFlow {
-                emitAppend("first-token")
+                emitTextDelta("first-token")
                 throw RuntimeException("Connection lost after first token")
             }
         )
@@ -384,6 +385,61 @@ class RetryingLLMClientTest {
         assertEquals(2, mockClient.moderateCalls)
     }
 
+    @Test
+    fun testIncompleteStreamExceptionBeforeFirstFrameTriggersRetry() = runTest {
+        var callCount = 0
+        val mockClient = MockLLMClient(
+            streamResponse = flow {
+                callCount++
+                if (callCount == 1) {
+                    throw IncompleteStreamException()
+                }
+                emit(StreamFrame.TextDelta("success"))
+                emit(StreamFrame.End(finishReason = "stop"))
+            }
+        )
+
+        val retryingClient = RetryingLLMClient(
+            mockClient,
+            RetryConfig(
+                maxAttempts = 3,
+                initialDelay = 10.milliseconds
+            )
+        )
+
+        val result = retryingClient.executeStreaming(testPrompt, testModel).toList()
+
+        assertEquals(
+            listOf(StreamFrame.TextDelta("success"), StreamFrame.End(finishReason = "stop")),
+            result
+        )
+        assertEquals(2, mockClient.streamCalls)
+    }
+
+    @Test
+    fun testIncompleteStreamExceptionAfterFirstFramePropagates() = runTest {
+        val mockClient = MockLLMClient(
+            streamResponse = streamFrameFlow {
+                emitTextDelta("first-token")
+                throw IncompleteStreamException()
+            }
+        )
+
+        val retryingClient = RetryingLLMClient(
+            mockClient,
+            RetryConfig(
+                maxAttempts = 3,
+                initialDelay = 10.milliseconds
+            )
+        )
+
+        assertFailsWith<IncompleteStreamException> {
+            retryingClient.executeStreaming(testPrompt, testModel).collect()
+        }
+
+        assertEquals(1, mockClient.streamCalls) // No retry after first frame
+    }
+
     // Mock LLMClient for testing
     private class MockLLMClient(
         private val executeResponse: List<Message.Response> = emptyList(),
@@ -395,7 +451,7 @@ class RetryingLLMClientTest {
         private val failureMessage: String = "Mock failure",
         private val throwCancellation: Boolean = false,
         private val llmProvider: LLMProvider = LLMProvider.OpenAI,
-    ) : LLMClient {
+    ) : LLMClient() {
 
         var executeCalls = 0
         var streamCalls = 0

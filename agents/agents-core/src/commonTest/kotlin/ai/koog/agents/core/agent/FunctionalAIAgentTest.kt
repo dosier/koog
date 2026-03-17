@@ -14,7 +14,8 @@ import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.executor.clients.anthropic.AnthropicModels
 import ai.koog.prompt.executor.clients.google.GoogleModels
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
-import ai.koog.prompt.llm.OllamaModels
+import ai.koog.prompt.executor.ollama.client.OllamaModels
+import ai.koog.serialization.kotlinx.KotlinxSerializer
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.serializer
@@ -24,6 +25,8 @@ import kotlin.test.assertFalse
 
 @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
 class FunctionalAIAgentTest {
+    private val serializer = KotlinxSerializer()
+
     @Test
     fun mixedTools_thenAssistantMessage() = runTest {
         val actualToolCalls = mutableListOf<String>()
@@ -33,7 +36,7 @@ class FunctionalAIAgentTest {
         }
 
         val assistantResponse = "Hey, I want to call following tools:"
-        val mockLLMApi = getMockExecutor(handleLastAssistantMessage = true) {
+        val mockLLMApi = getMockExecutor(serializer, handleLastAssistantMessage = true) {
             mockLLMAnswer(assistantResponse) onRequestContains assistantResponse
             mockLLMAnswer("I don't know how to answer that.").asDefaultResponse
 
@@ -68,7 +71,7 @@ class FunctionalAIAgentTest {
             }
         }
 
-        val result = agent.run("Solve task")
+        val result = agent.run("Solve task", null)
 
         assertEquals(3, actualToolCalls.size)
         assertEquals(assistantResponse, result)
@@ -82,7 +85,7 @@ class FunctionalAIAgentTest {
             tool(CreateTool)
         }
 
-        val mockLLMApi = getMockExecutor {
+        val mockLLMApi = getMockExecutor(serializer) {
             mockLLMAnswer("Hello!") onRequestContains "Hello"
             mockLLMAnswer("Tools called!") onRequestContains "created"
             mockLLMAnswer("Task solved!!") onRequestContains "Solve task"
@@ -108,7 +111,7 @@ class FunctionalAIAgentTest {
             }
         }
 
-        val result = agent.run("Solve task")
+        val result = agent.run("Solve task", null)
 
         assertEquals(0, actualToolCalls.size)
         assertEquals("Task solved!!", result)
@@ -122,7 +125,7 @@ class FunctionalAIAgentTest {
             tool(CreateTool)
         }
 
-        val mockLLMApi = getMockExecutor {
+        val mockLLMApi = getMockExecutor(serializer) {
             mockLLMAnswer("Hello!") onRequestContains "Hello"
             mockLLMAnswer("Tools called!") onRequestContains "created"
             mockLLMAnswer("I don't know how to answer that.").asDefaultResponse
@@ -152,7 +155,7 @@ class FunctionalAIAgentTest {
             }
         }
 
-        val result = agent.run("Solve task")
+        val result = agent.run("Solve task", null)
 
         assertEquals(1, actualToolCalls.size)
         assertEquals("Tools called!", result)
@@ -295,12 +298,17 @@ class FunctionalAIAgentTest {
 
     // Define sample tools for subtasks, similar in spirit to QATools so tool lists are not empty
     object ArchitectureTools {
-        object AnalyzeRequirements : SimpleTool<String>(
-            argsSerializer = String.serializer(),
+        object AnalyzeRequirements : SimpleTool<AnalyzeRequirements.Requirements>(
+            argsSerializer = Requirements.serializer(),
             name = "analyze_requirements",
             description = "Analyzes high-level mission requirements."
         ) {
-            override suspend fun execute(args: String): String = "Requirements analyzed: $args"
+            @Serializable
+            data class Requirements(
+                val value: String,
+            )
+
+            override suspend fun execute(args: Requirements): String = "Requirements analyzed: ${args.value}"
         }
 
         object DraftArchitecture : SimpleTool<Architecture>(
@@ -376,7 +384,7 @@ class FunctionalAIAgentTest {
     }
 
     @Test
-    fun `test_complex_subtasks_multistep_no_parallel_tools`() = runTest {
+    fun test_complex_subtasks_multistep_no_parallel_tools() = runTest {
         val actualToolCalls = mutableListOf<String>()
 
         val testToolRegistry = ToolRegistry {
@@ -421,7 +429,7 @@ class FunctionalAIAgentTest {
 
         var qaAttempt = 0
 
-        val mockLLMApi = getMockExecutor(handleLastAssistantMessage = false) {
+        val mockLLMApi = getMockExecutor(serializer, handleLastAssistantMessage = false) {
             // Design architecture subtask - match exact first request
             mockLLMToolCall(
                 SubgraphWithTaskUtils.finishTool<Architecture>(),
@@ -518,7 +526,7 @@ class FunctionalAIAgentTest {
             }
         }
 
-        val result = agent.run("Solve task")
+        val result = agent.run("Solve task", null)
 
         // Since finish tool calls are handled internally, no external tool executions are expected
         assertEquals(0, actualToolCalls.size)
@@ -548,7 +556,7 @@ class FunctionalAIAgentTest {
             (additionalInfo?.let { "Additional feedback: $additionalInfo" } ?: ""),
         input = architecture,
         tools = BuildEngineTools.tools,
-        llmModel = AnthropicModels.Sonnet_4_5,
+        llmModel = AnthropicModels.Opus_4_6,
         runMode = ToolCalls.SINGLE_RUN_SEQUENTIAL
     )
 
@@ -565,10 +573,10 @@ class FunctionalAIAgentTest {
     )
 
     @Test
-    fun `subtask_default_sequential_finish_only`() = runTest {
+    fun subtask_default_sequential_finish_only() = runTest {
         val actualToolCalls = mutableListOf<String>()
 
-        val mockLLMApi = getMockExecutor(handleLastAssistantMessage = false) {
+        val mockLLMApi = getMockExecutor(serializer, handleLastAssistantMessage = false) {
             // The subtask should immediately call the finish tool in SEQUENTIAL (multi-tool) mode
             mockLLMToolCall(
                 SubgraphWithTaskUtils.finishTool<SimpleOut>(),
@@ -597,19 +605,19 @@ class FunctionalAIAgentTest {
             }
         }
 
-        val result = agent.run("input-1")
+        val result = agent.run("input-1", null)
         assertEquals("done-seq", result.value)
         // finish tool is executed internally, so external tool executions list should be empty
         assertEquals(0, actualToolCalls.size)
     }
 
     @Test
-    fun `subtask_sequential_with_normal_tool_then_finish`() = runTest {
+    fun subtask_sequential_with_normal_tool_then_finish() = runTest {
         val actualToolCalls = mutableListOf<String>()
 
         val testToolRegistry = ToolRegistry { tool(DummyTool) }
 
-        val mockLLMApi = getMockExecutor(testToolRegistry, handleLastAssistantMessage = false) {
+        val mockLLMApi = getMockExecutor(serializer, handleLastAssistantMessage = false) {
             // First, LLM asks to call a normal tool, then after tool results it calls finish tool
             mockLLMToolCall(
                 listOf(
@@ -645,7 +653,7 @@ class FunctionalAIAgentTest {
             }
         }
 
-        val result = agent.run("seed-X")
+        val result = agent.run("seed-X", null)
         assertEquals("final-from-finish", result.value)
         // Only the normal tool goes through environment, finish tool is internal
         assertEquals(1, actualToolCalls.size)
@@ -654,10 +662,10 @@ class FunctionalAIAgentTest {
     }
 
     @Test
-    fun `subtask_parallel_finish_only`() = runTest {
+    fun subtask_parallel_finish_only() = runTest {
         val actualToolCalls = mutableListOf<String>()
 
-        val mockLLMApi = getMockExecutor(handleLastAssistantMessage = false) {
+        val mockLLMApi = getMockExecutor(serializer, handleLastAssistantMessage = false) {
             mockLLMToolCall(
                 SubgraphWithTaskUtils.finishTool<SimpleOut>(),
                 SimpleOut("done-par")
@@ -690,10 +698,10 @@ class FunctionalAIAgentTest {
     }
 
     @Test
-    fun `subtask_single_run_sequential_finish_only`() = runTest {
+    fun subtask_single_run_sequential_finish_only() = runTest {
         val actualToolCalls = mutableListOf<String>()
 
-        val mockLLMApi = getMockExecutor(handleLastAssistantMessage = false) {
+        val mockLLMApi = getMockExecutor(serializer, handleLastAssistantMessage = false) {
             mockLLMToolCall(
                 SubgraphWithTaskUtils.finishTool<SimpleOut>(),
                 SimpleOut("done-single")
@@ -720,17 +728,17 @@ class FunctionalAIAgentTest {
             }
         }
 
-        val result = agent.run("input-3")
+        val result = agent.run("input-3", null)
         assertEquals("done-single", result.value)
         assertEquals(0, actualToolCalls.size)
     }
 
     @OptIn(InternalAgentsApi::class)
     @Test
-    fun `subtask_withVerification_success`() = runTest {
+    fun subtask_withVerification_success() = runTest {
         val actualToolCalls = mutableListOf<String>()
 
-        val mockLLMApi = getMockExecutor(handleLastAssistantMessage = false) {
+        val mockLLMApi = getMockExecutor(serializer, handleLastAssistantMessage = false) {
             mockLLMToolCall(
                 SubgraphWithTaskUtils.finishTool<ai.koog.agents.ext.agent.CriticResultFromLLM>(),
                 ai.koog.agents.ext.agent.CriticResultFromLLM(isCorrect = true, feedback = "OK")
@@ -757,7 +765,7 @@ class FunctionalAIAgentTest {
             }
         }
 
-        val result = agent.run("case-A")
+        val result = agent.run("case-A", null)
         assertEquals(true, result.successful)
         assertEquals("OK", result.feedback)
         assertEquals("case-A", result.input)
@@ -772,7 +780,7 @@ class FunctionalAIAgentTest {
         val testFeatureMessageProcessor = TestFeatureMessageProcessor()
 
         val agent = AIAgent(
-            promptExecutor = getMockExecutor { },
+            promptExecutor = getMockExecutor(serializer) { },
             llmModel = model,
             strategy = strategy,
             systemPrompt = "You are helpful"
@@ -782,7 +790,7 @@ class FunctionalAIAgentTest {
             }
         }
 
-        agent.run("Test input")
+        agent.run("Test input", null)
         assertFalse(
             testFeatureMessageProcessor.isOpen.value,
             "Feature processors should be closed after run"

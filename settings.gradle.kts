@@ -11,13 +11,16 @@ pluginManagement {
 
 include(":agents:agents-core")
 include(":agents:agents-ext")
-include(":agents:agents-planner")
 
 include(":agents:agents-features:agents-features-acp")
 include(":agents:agents-features:agents-features-event-handler")
+include(":agents:agents-features:agents-features-longterm-memory")
 include(":agents:agents-features:agents-features-memory")
 include(":agents:agents-features:agents-features-opentelemetry")
 include(":agents:agents-features:agents-features-sql")
+include(":agents:agents-features:agents-features-chat-memory-sql")
+include(":agents:agents-features:agents-features-chat-history-jdbc")
+include(":agents:agents-features:agents-features-persistence-jdbc")
 include(":agents:agents-features:agents-features-trace")
 include(":agents:agents-features:agents-features-tokenizer")
 include(":agents:agents-features:agents-features-snapshot")
@@ -26,6 +29,7 @@ include(":agents:agents-features:agents-features-a2a-server")
 include(":agents:agents-features:agents-features-a2a-client")
 
 include(":agents:agents-mcp")
+include(":agents:agents-mcp-metadata")
 include(":agents:agents-mcp-server")
 include(":agents:agents-test")
 include(":agents:agents-tools")
@@ -53,10 +57,8 @@ include(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-openai-
 include(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-openrouter-client")
 include(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-dashscope-client")
 
-include(":prompt:prompt-executor:prompt-executor-llms")
 include(":prompt:prompt-executor:prompt-executor-llms-all")
 include(":prompt:prompt-executor:prompt-executor-model")
-
 include(":prompt:prompt-llm")
 include(":prompt:prompt-markdown")
 include(":prompt:prompt-model")
@@ -86,7 +88,14 @@ include(":http-client:http-client-ktor")
 include(":http-client:http-client-okhttp")
 include(":http-client:http-client-java")
 
+include(":serialization:serialization-core")
+include(":serialization:serialization-test")
+include(":serialization:serialization-jackson")
+
 include(":koog-spring-boot-starter")
+
+include(":koog-spring-ai:koog-spring-ai-starter-model-chat")
+include(":koog-spring-ai:koog-spring-ai-starter-model-embedding")
 
 include(":koog-ktor")
 include(":docs")

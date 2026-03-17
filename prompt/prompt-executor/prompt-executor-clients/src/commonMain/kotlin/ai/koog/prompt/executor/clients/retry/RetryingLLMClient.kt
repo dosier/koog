@@ -8,6 +8,7 @@ import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.message.Message
+import ai.koog.prompt.streaming.IncompleteStreamException
 import ai.koog.prompt.streaming.StreamFrame
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
@@ -37,7 +38,7 @@ import kotlin.time.Duration.Companion.milliseconds
 public class RetryingLLMClient @JvmOverloads constructor(
     private val delegate: LLMClient,
     internal val config: RetryConfig = RetryConfig()
-) : LLMClient {
+) : LLMClient() {
 
     /**
      * Retrieves the configured instance of the `LLMProvider` in use.
@@ -115,7 +116,7 @@ public class RetryingLLMClient @JvmOverloads constructor(
         delegate.moderate(prompt, model)
     }
 
-    override suspend fun models(): List<String> = withRetry("models") {
+    override suspend fun models(): List<LLModel> = withRetry("models") {
         delegate.models()
     }
 
@@ -150,6 +151,8 @@ public class RetryingLLMClient @JvmOverloads constructor(
     }
 
     private fun shouldRetry(error: Throwable): Boolean {
+        if (error is IncompleteStreamException) return true
+
         val message = error.message ?: return false
 
         // Check if error matches any retry pattern

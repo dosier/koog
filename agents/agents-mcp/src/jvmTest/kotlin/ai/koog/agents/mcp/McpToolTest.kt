@@ -1,10 +1,13 @@
 package ai.koog.agents.mcp
 
+import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.agents.core.tools.ToolParameterDescriptor
 import ai.koog.agents.core.tools.ToolParameterType
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
+import ai.koog.serialization.kotlinx.KotlinxSerializer
+import ai.koog.serialization.kotlinx.toKoogJSONObject
 import io.kotest.assertions.json.shouldEqualJson
 import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
@@ -19,14 +22,12 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
-import org.junit.jupiter.api.parallel.Execution
-import org.junit.jupiter.api.parallel.ExecutionMode
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
-@Execution(ExecutionMode.SAME_THREAD)
+@OptIn(InternalAgentsApi::class)
 class McpToolTest {
     companion object {
         private const val TEST_PORT = 3001
@@ -45,14 +46,12 @@ class McpToolTest {
         }
     }
 
+    private val serializer = KotlinxSerializer()
+
     private suspend fun testMcpTools(action: suspend (toolRegistry: ToolRegistry) -> Unit) {
         val toolRegistry = withContext(Dispatchers.Default.limitedParallelism(1)) {
             withTimeout(1.minutes) {
-                McpToolRegistryProvider.fromTransport(
-                    transport = McpToolRegistryProvider.defaultSseTransport("http://localhost:$TEST_PORT"),
-                    name = "test-client",
-                    version = "0.1.0"
-                )
+                McpToolRegistryProvider.fromSseUrl("http://localhost:$TEST_PORT")
             }
         }
 
@@ -76,8 +75,13 @@ class McpToolTest {
                     optionalParameters = listOf(
                         ToolParameterDescriptor(
                             name = "title",
-                            type = ToolParameterType.String,
                             description = "Title to use in the greeting",
+                            type = ToolParameterType.AnyOf(
+                                types = arrayOf(
+                                    ToolParameterDescriptor(type = ToolParameterType.Null, name = "", description = ""),
+                                    ToolParameterDescriptor(type = ToolParameterType.String, name = "", description = "")
+                                )
+                            )
                         )
                     )
                 ),
@@ -102,7 +106,7 @@ class McpToolTest {
 
             val result = withContext(Dispatchers.Default.limitedParallelism(1)) {
                 withTimeout(1.minutes) {
-                    greetingTool.execute(args)
+                    greetingTool.execute(args.toKoogJSONObject())
                 }
             }
 
@@ -115,14 +119,14 @@ class McpToolTest {
             }
             val resultWithTitle = withContext(Dispatchers.Default.limitedParallelism(1)) {
                 withTimeout(1.minutes) {
-                    greetingTool.execute(argsWithTitle)
+                    greetingTool.execute(argsWithTitle.toKoogJSONObject())
                 }
             }
 
             val contentWithTitle = resultWithTitle.content.single() as TextContent
             assertEquals("Hello, Mr. Test!", contentWithTitle.text)
 
-            val encodedResult = greetingTool.encodeResultToString(result)
+            val encodedResult = greetingTool.encodeResultToString(result, serializer)
             encodedResult shouldEqualJson """{"content":[{"text":"Hello, Test!","type":"text"}]}"""
         }
     }
@@ -135,12 +139,12 @@ class McpToolTest {
 
             val result = withContext(Dispatchers.Default.limitedParallelism(1)) {
                 withTimeout(1.minutes) {
-                    emptyTool.execute(args)
+                    emptyTool.execute(args.toKoogJSONObject())
                 }
             }
-            assertEquals(emptyList(), result.content.orEmpty())
+            assertEquals(emptyList(), result.content)
 
-            val encodedResult = emptyTool.encodeResultToString(result)
+            val encodedResult = emptyTool.encodeResultToString(result, serializer)
             encodedResult shouldEqualJson """{"content":[]}"""
         }
     }
@@ -156,9 +160,10 @@ class McpToolTest {
         )
         val mcpTool = McpTool(
             mcpClient = Client(clientInfo = Implementation(name = "Test", version = "1.0")),
+            metadata = emptyMap(),
             descriptor = toolDescriptor,
         )
-        val encodedResult = mcpTool.encodeResultToString(result)
+        val encodedResult = mcpTool.encodeResultToString(result, serializer)
 
         encodedResult shouldEqualJson """{"content":[{"text":"Hello world","type":"text"}]}"""
     }
@@ -174,9 +179,10 @@ class McpToolTest {
         )
         val mcpTool = McpTool(
             mcpClient = Client(clientInfo = Implementation(name = "Test", version = "1.0")),
+            metadata = emptyMap(),
             descriptor = toolDescriptor,
         )
-        val encodedResult = mcpTool.encodeResultToString(result)
+        val encodedResult = mcpTool.encodeResultToString(result, serializer)
 
         assertEquals(
             expected = "null",

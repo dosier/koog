@@ -10,39 +10,43 @@ import ai.koog.agents.core.tools.Tool
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.core.utils.ActiveProperty
+import ai.koog.prompt.dsl.ModerationResult
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.dsl.PromptBuilder
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.model.PromptExecutor
+import ai.koog.prompt.executor.model.StructureFixingParser
 import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.message.LLMChoice
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.processor.ResponseProcessor
 import ai.koog.prompt.streaming.StreamFrame
 import ai.koog.prompt.structure.StructureDefinition
-import ai.koog.prompt.structure.StructureFixingParser
 import ai.koog.prompt.structure.StructuredRequestConfig
 import ai.koog.prompt.structure.StructuredResponse
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapMerge
 import kotlinx.coroutines.flow.flow
-import kotlin.time.Clock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.serializer
 import kotlin.reflect.KClass
+import kotlin.time.Clock
 
 @PublishedApi
 internal class AIAgentLLMWriteSessionImpl internal constructor(
     override val environment: AIAgentEnvironment,
-    executor: PromptExecutor,
+    private val executor: PromptExecutor,
     tools: List<ToolDescriptor>,
     override val toolRegistry: ToolRegistry,
     prompt: Prompt,
     model: LLModel,
     responseProcessor: ResponseProcessor?,
-    config: AIAgentConfig,
+    override val config: AIAgentConfig,
     override val clock: Clock,
-) : AIAgentLLMSession(executor, tools, prompt, model, responseProcessor, config), AIAgentLLMWriteSessionAPI {
+) : AIAgentLLMWriteSessionAPI {
+    private val readSessionImpl
+        get() = AIAgentLLMReadSessionImpl(executor, tools, prompt, model, responseProcessor, config, isActive)
 
     override var prompt: Prompt by ActiveProperty(prompt) { isActive }
 
@@ -52,80 +56,90 @@ internal class AIAgentLLMWriteSessionImpl internal constructor(
 
     override var responseProcessor: ResponseProcessor? by ActiveProperty(responseProcessor) { isActive }
 
-    public override fun <TArgs, TResult> findTool(tool: Tool<TArgs, TResult>): SafeTool<TArgs, TResult> {
+    private var isActive: Boolean = true
+
+    override fun <TArgs, TResult> findTool(tool: Tool<TArgs, TResult>): SafeTool<TArgs, TResult> {
         return findTool(tool::class)
     }
 
     @Suppress("UNCHECKED_CAST")
-    public override fun <TArgs, TResult> findTool(toolClass: KClass<out Tool<TArgs, TResult>>): SafeTool<TArgs, TResult> {
+    override fun <TArgs, TResult> findTool(toolClass: KClass<out Tool<TArgs, TResult>>): SafeTool<TArgs, TResult> {
         val tool = toolRegistry.tools.find(toolClass::isInstance) as? Tool<TArgs, TResult>
             ?: throw IllegalArgumentException("Tool with type ${toolClass.simpleName} is not defined")
 
         return SafeTool(tool, environment, clock)
     }
 
-    public override fun appendPrompt(body: PromptBuilder.() -> Unit) {
+    override fun appendPrompt(body: PromptBuilder.() -> Unit) {
         prompt = prompt(prompt, clock, body)
     }
 
     @Deprecated("Use `appendPrompt` instead", ReplaceWith("appendPrompt(body)"))
-    public override fun updatePrompt(body: PromptBuilder.() -> Unit) {
+    override fun updatePrompt(body: PromptBuilder.() -> Unit) {
         appendPrompt(body)
     }
 
-    public override fun rewritePrompt(body: (prompt: Prompt) -> Prompt) {
+    override fun rewritePrompt(body: (prompt: Prompt) -> Prompt) {
         prompt = body(prompt)
     }
 
-    public override fun changeModel(newModel: LLModel) {
+    override fun changeModel(newModel: LLModel) {
         model = newModel
     }
 
-    public override fun changeLLMParams(newParams: LLMParams): Unit = rewritePrompt {
+    override fun changeLLMParams(newParams: LLMParams) = rewritePrompt {
         prompt.withParams(newParams)
     }
 
     override suspend fun requestLLMMultipleWithoutTools(): List<Message.Response> {
-        return super<AIAgentLLMSession>.requestLLMMultipleWithoutTools().also { responses ->
+        return readSessionImpl.requestLLMMultipleWithoutTools().also { responses ->
             appendPrompt { messages(responses) }
         }
     }
 
     override suspend fun requestLLMWithoutTools(): Message.Response {
         config
-        return super<AIAgentLLMSession>.requestLLMWithoutTools().also { response -> appendPrompt { message(response) } }
+        return readSessionImpl.requestLLMWithoutTools().also { response -> appendPrompt { message(response) } }
     }
 
     override suspend fun requestLLMOnlyCallingTools(): Message.Response {
-        return super<AIAgentLLMSession>.requestLLMOnlyCallingTools()
+        return readSessionImpl.requestLLMOnlyCallingTools()
             .also { response -> appendPrompt { message(response) } }
     }
 
     override suspend fun requestLLMMultipleOnlyCallingTools(): List<Message.Response> {
-        return super<AIAgentLLMSession>.requestLLMMultipleOnlyCallingTools()
+        return readSessionImpl.requestLLMMultipleOnlyCallingTools()
             .also { responses ->
                 appendPrompt { messages(responses) }
             }
     }
 
     override suspend fun requestLLMForceOneTool(tool: ToolDescriptor): Message.Response {
-        return super<AIAgentLLMSession>.requestLLMForceOneTool(tool)
+        return readSessionImpl.requestLLMForceOneTool(tool)
             .also { response -> appendPrompt { message(response) } }
     }
 
     override suspend fun requestLLMForceOneTool(tool: Tool<*, *>): Message.Response {
-        return super<AIAgentLLMSession>.requestLLMForceOneTool(tool)
+        return readSessionImpl.requestLLMForceOneTool(tool)
             .also { response -> appendPrompt { message(response) } }
     }
 
     override suspend fun requestLLM(): Message.Response {
-        return super<AIAgentLLMSession>.requestLLM().also { response ->
+        return readSessionImpl.requestLLM().also { response ->
             appendPrompt { message(response) }
         }
     }
 
+    override suspend fun requestLLMStreaming(): Flow<StreamFrame> {
+        return readSessionImpl.requestLLMStreaming()
+    }
+
+    override suspend fun requestModeration(moderatingModel: LLModel?): ModerationResult {
+        return readSessionImpl.requestModeration(moderatingModel)
+    }
+
     override suspend fun requestLLMMultiple(): List<Message.Response> {
-        return super<AIAgentLLMSession>.requestLLMMultiple().also { responses ->
+        return readSessionImpl.requestLLMMultiple().also { responses ->
             appendPrompt {
                 responses.forEach { message(it) }
             }
@@ -134,8 +148,9 @@ internal class AIAgentLLMWriteSessionImpl internal constructor(
 
     override suspend fun <T> requestLLMStructured(
         config: StructuredRequestConfig<T>,
+        fixingParser: StructureFixingParser?
     ): Result<StructuredResponse<T>> {
-        return super<AIAgentLLMSession>.requestLLMStructured(config).also {
+        return readSessionImpl.requestLLMStructured(config).also {
             it.onSuccess { response ->
                 appendPrompt {
                     message(response.message)
@@ -159,7 +174,7 @@ internal class AIAgentLLMWriteSessionImpl internal constructor(
         examples: List<T>,
         fixingParser: StructureFixingParser?
     ): Result<StructuredResponse<T>> {
-        return super<AIAgentLLMSession>.requestLLMStructured(serializer, examples, fixingParser).also {
+        return readSessionImpl.requestLLMStructured(serializer, examples, fixingParser).also {
             it.onSuccess { response ->
                 appendPrompt {
                     message(response.message)
@@ -168,7 +183,19 @@ internal class AIAgentLLMWriteSessionImpl internal constructor(
         }
     }
 
-    public override suspend fun requestLLMStreaming(definition: StructureDefinition?): Flow<StreamFrame> {
+    override suspend fun <T> parseResponseToStructuredResponse(
+        response: Message.Assistant,
+        config: StructuredRequestConfig<T>,
+        fixingParser: StructureFixingParser?
+    ): StructuredResponse<T> {
+        return readSessionImpl.parseResponseToStructuredResponse(response, config)
+    }
+
+    override suspend fun requestLLMMultipleChoices(): List<LLMChoice> {
+        return readSessionImpl.requestLLMMultipleChoices()
+    }
+
+    override suspend fun requestLLMStreaming(definition: StructureDefinition?): Flow<StreamFrame> {
         if (definition != null) {
             val prompt = prompt(prompt, clock) {
                 user {
@@ -177,7 +204,8 @@ internal class AIAgentLLMWriteSessionImpl internal constructor(
             }
             this.prompt = prompt
         }
-        return super<AIAgentLLMSession>.requestLLMStreaming()
+
+        return readSessionImpl.requestLLMStreaming()
     }
 
     @PublishedApi
@@ -186,7 +214,7 @@ internal class AIAgentLLMWriteSessionImpl internal constructor(
         concurrency: Int = 16
     ): Flow<SafeTool.Result<TResult>> = flatMapMerge(concurrency) { args ->
         flow {
-            emit(safeTool.execute(args))
+            emit(safeTool.execute(args, config.serializer))
         }
     }
 
@@ -196,7 +224,7 @@ internal class AIAgentLLMWriteSessionImpl internal constructor(
         concurrency: Int = 16
     ): Flow<String> = flatMapMerge(concurrency) { args ->
         flow {
-            emit(safeTool.executeRaw(args))
+            emit(safeTool.execute(args, config.serializer).content)
         }
     }
 
@@ -207,7 +235,7 @@ internal class AIAgentLLMWriteSessionImpl internal constructor(
     ): Flow<SafeTool.Result<TResult>> = flatMapMerge(concurrency) { args ->
         val safeTool = findTool(tool::class)
         flow {
-            emit(safeTool.execute(args))
+            emit(safeTool.execute(args, config.serializer))
         }
     }
 
@@ -227,5 +255,9 @@ internal class AIAgentLLMWriteSessionImpl internal constructor(
     ): Flow<String> {
         val tool = findTool(toolClass)
         return toParallelToolCallsRawImpl(tool, concurrency)
+    }
+
+    override fun close() {
+        isActive = false
     }
 }

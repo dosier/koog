@@ -9,17 +9,20 @@ import ai.koog.agents.snapshot.providers.InMemoryPersistenceStorageProvider
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.model.PromptExecutor
-import ai.koog.prompt.llm.OllamaModels
+import ai.koog.prompt.executor.ollama.client.OllamaModels
+import ai.koog.serialization.JSONPrimitive
+import ai.koog.serialization.kotlinx.KotlinxSerializer
 import kotlinx.coroutines.test.runTest
-import kotlin.time.Clock
-import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.time.Clock
 
 /**
  * Tests for checkpoint functionality in subgraphs.
  */
 class SubgraphCheckpointsTest {
+    private val serializer = KotlinxSerializer()
+
     val systemPrompt = "You are a test agent."
     val agentConfig = AIAgentConfig(
         prompt = prompt("test") {
@@ -36,7 +39,7 @@ class SubgraphCheckpointsTest {
     fun test_singleSubgraph_createCheckpoint() = runTest {
         val checkpointId = "test-checkpoint"
         val agent = AIAgent(
-            promptExecutor = getMockExecutor { },
+            promptExecutor = getMockExecutor(serializer) { },
             strategy = checkpointSubgraphStrategy(checkpointId),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
@@ -46,7 +49,7 @@ class SubgraphCheckpointsTest {
             }
         }
 
-        val output = agent.run("Start the test")
+        val output = agent.run("Start the test", null)
 
         assertEquals(
             "Start the test\n" +
@@ -63,7 +66,7 @@ class SubgraphCheckpointsTest {
     fun test_singleSubgraph_createAndRollbackToCheckpoint() = runTest {
         val checkpointId = "test-checkpoint"
         val agent = AIAgent(
-            promptExecutor = getMockExecutor { },
+            promptExecutor = getMockExecutor(serializer) { },
             strategy = checkpointSubgraphWithRollbackStrategy(checkpointId),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
@@ -73,7 +76,7 @@ class SubgraphCheckpointsTest {
             }
         }
 
-        val output = agent.run("Start the test")
+        val output = agent.run("Start the test", null)
 
         assertEquals(
             "History: You are a test agent.\n" +
@@ -90,7 +93,7 @@ class SubgraphCheckpointsTest {
     fun test_nestedSubgraphs_createCheckpoint() = runTest {
         val checkpointId = "test-checkpoint"
         val agent = AIAgent(
-            promptExecutor = getMockExecutor { },
+            promptExecutor = getMockExecutor(serializer) { },
             strategy = nestedSubgraphCheckpointStrategy(checkpointId),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
@@ -100,7 +103,7 @@ class SubgraphCheckpointsTest {
             }
         }
 
-        val output = agent.run("Start the test")
+        val output = agent.run("Start the test", null)
 
         assertEquals(
             "History: You are a test agent.\n" +
@@ -118,7 +121,7 @@ class SubgraphCheckpointsTest {
     fun test_nestedSubgraphs_createAndRollbackToCheckpoint() = runTest {
         val checkpointId = "test-checkpoint"
         val agent = AIAgent(
-            promptExecutor = getMockExecutor { },
+            promptExecutor = getMockExecutor(serializer) { },
             strategy = nestedSubgraphCheckpointWithRollbackStrategy(checkpointId),
             agentConfig = agentConfig,
             toolRegistry = toolRegistry
@@ -128,7 +131,7 @@ class SubgraphCheckpointsTest {
             }
         }
 
-        val output = agent.run("Start the test")
+        val output = agent.run("Start the test", null)
 
         assertEquals(
             "History: You are a test agent.\n" +
@@ -145,7 +148,7 @@ class SubgraphCheckpointsTest {
 
     @Test
     fun `test reusing subgraph with Persistence - clean start `() = runTest {
-        val mockExecutor: PromptExecutor = getMockExecutor {}
+        val mockExecutor: PromptExecutor = getMockExecutor(serializer) {}
 
         val agentConfig = AIAgentConfig(
             prompt = prompt("test") {
@@ -166,12 +169,12 @@ class SubgraphCheckpointsTest {
             }
         }
 
-        agent.run("Start the test")
+        agent.run("Start the test", null)
     }
 
     @Test
     fun `test reusing subgraph with Persistence - checkpoint start`() = runTest {
-        val mockExecutor: PromptExecutor = getMockExecutor {}
+        val mockExecutor: PromptExecutor = getMockExecutor(serializer) {}
         val agentId = "test-agent"
 
         val inMemoryPersistence = InMemoryPersistenceStorageProvider()
@@ -180,7 +183,7 @@ class SubgraphCheckpointsTest {
             checkpointId = "checkpoint-1",
             createdAt = Clock.System.now(),
             nodePath = path(agentId, "repeated-subgraphs-test", "sg1", "sgNode1"),
-            lastInput = JsonPrimitive("Input at checkpoint"),
+            lastInput = JSONPrimitive("Input at checkpoint"),
             messageHistory = listOf(),
             version = 1L
         )
@@ -206,6 +209,6 @@ class SubgraphCheckpointsTest {
             }
         }
 
-        agent.run("Start the test")
+        agent.run("Start the test", null)
     }
 }

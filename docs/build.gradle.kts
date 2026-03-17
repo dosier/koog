@@ -13,6 +13,20 @@ kotlin {
     compilerOptions.allWarningsAsErrors.set(true)
 }
 
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs("src/main/kotlin")
+        }
+    }
+}
+
 dependencies {
     implementation(project(":a2a:a2a-client"))
     implementation(project(":a2a:a2a-core"))
@@ -23,6 +37,7 @@ dependencies {
     implementation(project(":agents:agents-features:agents-features-acp"))
     implementation(project(":agents:agents-test"))
     implementation(project(":koog-agents"))
+    implementation(project(":serialization:serialization-jackson"))
     api(libs.opentelemetry.exporter.logging)
     api(libs.opentelemetry.exporter.otlp)
 }

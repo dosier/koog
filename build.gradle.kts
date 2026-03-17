@@ -17,7 +17,7 @@ import java.util.Base64
 version = run {
     // our version follows the semver specification
 
-    val baseVersion = "0.6.0"
+    val baseVersion = findProperty("version")
 
     val feat = run {
         val releaseBuild = !System.getenv("BRANCH_KOOG_IS_RELEASING_FROM").isNullOrBlank()
@@ -80,7 +80,7 @@ version = run {
     "0.6.0-flopiq-3"
 }
 
-fun isCustomReleaseBranch(branchName: String): Boolean = branchName.matches(Regex("""^\d+\.\d+\.\d+$"""))
+fun isCustomReleaseBranch(branchName: String): Boolean = branchName.matches(Regex("""^(release\/)?\d+\.\d+\.\d+$"""))
 
 buildscript {
     dependencies {
@@ -99,6 +99,8 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // For testing dev versions of dependencies
+        mavenLocal()
     }
 }
 
@@ -188,7 +190,14 @@ tasks {
 
             println("Sending request to $uri...")
 
-            val client = OkHttpClient()
+            val client = OkHttpClient.Builder()
+                .connectTimeout(40, TimeUnit.SECONDS)
+                .writeTimeout(10, TimeUnit.MINUTES)
+                .readTimeout(10, TimeUnit.MINUTES)
+                .callTimeout(15, TimeUnit.MINUTES)
+                .retryOnConnectionFailure(true)
+                .build()
+
             val request = Request.Builder()
                 .url(uri)
                 .header("Authorization", "Bearer $base64Auth")
@@ -215,12 +224,12 @@ dependencies {
     dokka(project(":agents:agents-core"))
     dokka(project(":agents:agents-ext"))
     dokka(project(":agents:agents-features:agents-features-event-handler"))
+    dokka(project(":agents:agents-features:agents-features-longterm-memory"))
     dokka(project(":agents:agents-features:agents-features-memory"))
     dokka(project(":agents:agents-features:agents-features-opentelemetry"))
     dokka(project(":agents:agents-features:agents-features-snapshot"))
     dokka(project(":agents:agents-features:agents-features-tokenizer"))
     dokka(project(":agents:agents-features:agents-features-trace"))
-    dokka(project(":agents:agents-planner"))
     dokka(project(":agents:agents-mcp"))
     dokka(project(":agents:agents-test"))
     dokka(project(":agents:agents-tools"))
@@ -228,6 +237,8 @@ dependencies {
     dokka(project(":embeddings:embeddings-base"))
     dokka(project(":embeddings:embeddings-llm"))
     dokka(project(":koog-ktor"))
+    dokka(project(":koog-spring-ai:koog-spring-ai-starter-model-chat"))
+    dokka(project(":koog-spring-ai:koog-spring-ai-starter-model-embedding"))
     dokka(project(":koog-spring-boot-starter"))
     dokka(project(":prompt:prompt-cache:prompt-cache-files"))
     dokka(project(":prompt:prompt-cache:prompt-cache-model"))
@@ -244,7 +255,6 @@ dependencies {
     dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-openai-client-base"))
     dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-openrouter-client"))
     dokka(project(":prompt:prompt-executor:prompt-executor-clients:prompt-executor-dashscope-client"))
-    dokka(project(":prompt:prompt-executor:prompt-executor-llms"))
     dokka(project(":prompt:prompt-executor:prompt-executor-llms-all"))
     dokka(project(":prompt:prompt-executor:prompt-executor-model"))
     dokka(project(":prompt:prompt-llm"))

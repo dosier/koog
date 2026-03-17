@@ -13,7 +13,6 @@ import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.core.environment.AIAgentEnvironment
 import ai.koog.agents.core.feature.AIAgentFeature
 import ai.koog.agents.core.feature.config.FeatureConfig
-import ai.koog.agents.core.feature.handler.AgentLifecycleEventContext
 import ai.koog.agents.core.feature.handler.agent.AgentClosingContext
 import ai.koog.agents.core.feature.handler.agent.AgentCompletedContext
 import ai.koog.agents.core.feature.handler.agent.AgentEnvironmentTransformingContext
@@ -38,11 +37,11 @@ import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.streaming.StreamFrame
-import kotlin.time.Clock
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
+import ai.koog.serialization.JSONElement
+import ai.koog.serialization.JSONObject
+import ai.koog.serialization.TypeToken
 import kotlin.reflect.KClass
-import kotlin.reflect.KType
+import kotlin.time.Clock
 
 /**
  * Platform-agnostic API for agent pipelines. Implemented by both the expect/actual AIAgentPipeline
@@ -67,6 +66,8 @@ public interface AIAgentPipelineAPI {
     public suspend fun uninstall(featureKey: AIAgentStorageKey<*>)
 
     //region Trigger Agent Handlers
+
+    @InternalAgentsApi
     public suspend fun <TInput, TOutput> onAgentStarting(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -75,6 +76,7 @@ public interface AIAgentPipelineAPI {
         context: AIAgentContext
     )
 
+    @InternalAgentsApi
     public suspend fun onAgentCompleted(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -84,6 +86,7 @@ public interface AIAgentPipelineAPI {
         context: AIAgentContext
     )
 
+    @InternalAgentsApi
     public suspend fun onAgentExecutionFailed(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -93,21 +96,26 @@ public interface AIAgentPipelineAPI {
         context: AIAgentContext
     )
 
+    @InternalAgentsApi
     public suspend fun onAgentClosing(
         eventId: String,
         executionInfo: AgentExecutionInfo,
         agentId: String
     )
 
+    @InternalAgentsApi
     public suspend fun onAgentEnvironmentTransforming(
         eventId: String,
         executionInfo: AgentExecutionInfo,
         agent: GraphAIAgent<*, *>,
         baseEnvironment: AIAgentEnvironment
     ): AIAgentEnvironment
-    //endregion
+
+    //endregion Trigger Agent Handlers
 
     //region Trigger Strategy Handlers
+
+    @InternalAgentsApi
     public suspend fun onStrategyStarting(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -115,17 +123,21 @@ public interface AIAgentPipelineAPI {
         context: AIAgentContext
     )
 
+    @InternalAgentsApi
     public suspend fun onStrategyCompleted(
         eventId: String,
         executionInfo: AgentExecutionInfo,
         strategy: AIAgentStrategy<*, *, *>,
         context: AIAgentContext,
         result: Any?,
-        resultType: KType
+        resultType: TypeToken
     )
-    //endregion
+
+    //endregion Trigger Strategy Handlers
 
     //region Trigger LLM Handlers
+
+    @InternalAgentsApi
     public suspend fun onLLMCallStarting(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -136,6 +148,7 @@ public interface AIAgentPipelineAPI {
         context: AIAgentContext
     )
 
+    @InternalAgentsApi
     public suspend fun onLLMCallCompleted(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -147,9 +160,12 @@ public interface AIAgentPipelineAPI {
         moderationResponse: ModerationResult? = null,
         context: AIAgentContext
     )
-    //endregion
+
+    //endregion Trigger LLM Handlers
 
     //region Trigger Tool Handlers
+
+    @InternalAgentsApi
     public suspend fun onToolCallStarting(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -157,10 +173,11 @@ public interface AIAgentPipelineAPI {
         toolCallId: String?,
         toolName: String,
         toolDescription: String?,
-        toolArgs: JsonObject,
+        toolArgs: JSONObject,
         context: AIAgentContext
     )
 
+    @InternalAgentsApi
     public suspend fun onToolValidationFailed(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -168,12 +185,13 @@ public interface AIAgentPipelineAPI {
         toolCallId: String?,
         toolName: String,
         toolDescription: String?,
-        toolArgs: JsonObject,
+        toolArgs: JSONObject,
         message: String,
         error: AIAgentError,
         context: AIAgentContext
     )
 
+    @InternalAgentsApi
     public suspend fun onToolCallFailed(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -181,12 +199,13 @@ public interface AIAgentPipelineAPI {
         toolCallId: String?,
         toolName: String,
         toolDescription: String?,
-        toolArgs: JsonObject,
+        toolArgs: JSONObject,
         message: String,
         error: AIAgentError?,
         context: AIAgentContext
     )
 
+    @InternalAgentsApi
     public suspend fun onToolCallCompleted(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -194,13 +213,16 @@ public interface AIAgentPipelineAPI {
         toolCallId: String?,
         toolName: String,
         toolDescription: String?,
-        toolArgs: JsonObject,
-        toolResult: JsonElement?,
+        toolArgs: JSONObject,
+        toolResult: JSONElement?,
         context: AIAgentContext
     )
-    //endregion
+
+    //endregion Trigger Tool Handlers
 
     //region Trigger Streaming Handlers
+
+    @InternalAgentsApi
     public suspend fun onLLMStreamingStarting(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -211,6 +233,7 @@ public interface AIAgentPipelineAPI {
         context: AIAgentContext
     )
 
+    @InternalAgentsApi
     public suspend fun onLLMStreamingFrameReceived(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -221,6 +244,7 @@ public interface AIAgentPipelineAPI {
         context: AIAgentContext
     )
 
+    @InternalAgentsApi
     public suspend fun onLLMStreamingFailed(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -231,6 +255,7 @@ public interface AIAgentPipelineAPI {
         context: AIAgentContext
     )
 
+    @InternalAgentsApi
     public suspend fun onLLMStreamingCompleted(
         eventId: String,
         executionInfo: AgentExecutionInfo,
@@ -240,15 +265,18 @@ public interface AIAgentPipelineAPI {
         tools: List<ToolDescriptor>,
         context: AIAgentContext
     )
-    //endregion
+
+    //endregion Trigger Streaming Handlers
 
     //region Interceptors
+
     public fun interceptEnvironmentCreated(
         feature: AIAgentFeature<*, *>,
-        transform: suspend AgentEnvironmentTransformingContext.(AIAgentEnvironment) -> AIAgentEnvironment
+        handle: suspend (eventContext: AgentEnvironmentTransformingContext, environment: AIAgentEnvironment) -> AIAgentEnvironment
     )
 
     public fun interceptAgentStarting(feature: AIAgentFeature<*, *>, handle: suspend (AgentStartingContext) -> Unit)
+
     public fun interceptAgentCompleted(
         feature: AIAgentFeature<*, *>,
         handle: suspend (eventContext: AgentCompletedContext) -> Unit
@@ -325,6 +353,7 @@ public interface AIAgentPipelineAPI {
     )
 
     // Short aliases
+
     public fun interceptBeforeAgentStarted(
         feature: AIAgentFeature<*, *>,
         handle: suspend (AgentStartingContext) -> Unit
@@ -341,7 +370,9 @@ public interface AIAgentPipelineAPI {
     )
 
     public fun interceptAgentBeforeClose(feature: AIAgentFeature<*, *>, handle: suspend (AgentClosingContext) -> Unit)
+
     public fun interceptStrategyStart(feature: AIAgentFeature<*, *>, handle: suspend (StrategyStartingContext) -> Unit)
+
     public fun interceptStrategyFinished(
         feature: AIAgentFeature<*, *>,
         handle: suspend (StrategyCompletedContext) -> Unit
@@ -377,20 +408,7 @@ public interface AIAgentPipelineAPI {
         handle: suspend (eventContext: ToolValidationFailedContext) -> Unit
     )
 
-    @InternalAgentsApi
-    public fun <TContext : AgentLifecycleEventContext> createConditionalHandler(
-        feature: AIAgentFeature<*, *>,
-        handle: suspend (TContext) -> Unit
-    ): suspend (TContext) -> Unit
-
-    @InternalAgentsApi
-    public fun createConditionalHandler(
-        feature: AIAgentFeature<*, *>,
-        handle: suspend AgentEnvironmentTransformingContext.(AIAgentEnvironment) -> AIAgentEnvironment
-    ): suspend (AgentEnvironmentTransformingContext, AIAgentEnvironment) -> AIAgentEnvironment
-
-    public fun FeatureConfig.isAccepted(eventContext: AgentLifecycleEventContext): Boolean
-    //endregion
+    //endregion Interceptors
 
     @InternalAgentsApi
     public suspend fun prepareFeatures()

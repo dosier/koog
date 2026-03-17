@@ -16,12 +16,15 @@ import ai.koog.prompt.executor.clients.openai.base.models.OpenAIToolChoice
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.LLMChoice
+import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
-import ai.koog.prompt.streaming.StreamFrameFlowBuilder
+import ai.koog.prompt.streaming.StreamFrame
+import ai.koog.prompt.streaming.buildStreamFrameFlow
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
-import kotlin.time.Clock
+import kotlinx.coroutines.flow.Flow
 import kotlin.jvm.JvmOverloads
+import kotlin.time.Clock
 
 /**
  * Configuration settings for connecting to the DashScope API using OpenAI-compatible endpoints.
@@ -64,11 +67,6 @@ public class DashscopeLLMClient @JvmOverloads constructor(
 
     private companion object {
         private val staticLogger = KotlinLogging.logger { }
-
-        init {
-            // On class load register custom OpenAI JSON schema generators for structured output.
-            registerOpenAIJsonSchemaGenerators(LLMProvider.Alibaba)
-        }
     }
 
     override fun llmProvider(): LLMProvider = LLMProvider.Alibaba
@@ -123,18 +121,31 @@ public class DashscopeLLMClient @JvmOverloads constructor(
     override fun decodeResponse(data: String): DashscopeChatCompletionResponse =
         json.decodeFromString(data)
 
-    override suspend fun StreamFrameFlowBuilder.processStreamingChunk(chunk: DashscopeChatCompletionStreamResponse) {
-        chunk.choices.firstOrNull()?.let { choice ->
-            choice.delta.content?.let { emitAppend(it) }
-            choice.delta.toolCalls?.forEach { toolCall ->
-                val index = toolCall.index
-                val id = toolCall.id
-                val name = toolCall.function?.name
-                val arguments = toolCall.function?.arguments
-                upsertToolCall(index, id, name, arguments)
+    override fun processStreamingResponse(
+        response: Flow<DashscopeChatCompletionStreamResponse>
+    ): Flow<StreamFrame> = buildStreamFrameFlow {
+        var finishReason: String? = null
+        var metaInfo: ResponseMetaInfo? = null
+
+        response.collect { chunk ->
+            chunk.choices.firstOrNull()?.let { choice ->
+                choice.delta.content?.let { emitTextDelta(it) }
+
+                choice.delta.toolCalls?.forEach { toolCall ->
+                    val id = toolCall.id?.takeIf { it.isNotEmpty() }
+                    val name = toolCall.function?.name
+                    val arguments = toolCall.function?.arguments
+                    val index = toolCall.index
+                    emitToolCallDelta(id, name, arguments, index)
+                }
+
+                choice.finishReason?.let { finishReason = it }
             }
-            choice.finishReason?.let { emitEnd(it, createMetaInfo(chunk.usage)) }
+
+            chunk.usage?.let { metaInfo = createMetaInfo(chunk.usage) }
         }
+
+        emitEnd(finishReason, metaInfo)
     }
 
     public override suspend fun moderate(prompt: Prompt, model: LLModel): ModerationResult {

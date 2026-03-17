@@ -2,6 +2,7 @@ package ai.koog.prompt.executor.clients.anthropic
 
 import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.agents.core.tools.ToolParameterType
+import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
 import ai.koog.http.client.KoogHttpClient
 import ai.koog.http.client.ktor.fromKtorClient
 import ai.koog.prompt.dsl.ModerationResult
@@ -13,6 +14,7 @@ import ai.koog.prompt.executor.clients.anthropic.models.AnthropicContent
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicMessage
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicMessageRequest
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicMessageRequestSerializer
+import ai.koog.prompt.executor.clients.anthropic.models.AnthropicModelsResponse
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicResponse
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicStreamDeltaContentType
 import ai.koog.prompt.executor.clients.anthropic.models.AnthropicStreamEventType
@@ -25,6 +27,7 @@ import ai.koog.prompt.executor.clients.anthropic.models.AnthropicUsage
 import ai.koog.prompt.executor.clients.anthropic.models.DocumentSource
 import ai.koog.prompt.executor.clients.anthropic.models.ImageSource
 import ai.koog.prompt.executor.clients.anthropic.models.SystemAnthropicMessage
+import ai.koog.prompt.executor.clients.modelsById
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
@@ -35,6 +38,7 @@ import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.streaming.StreamFrame
 import ai.koog.prompt.streaming.buildStreamFrameFlow
+import ai.koog.prompt.streaming.requireEndFrame
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
@@ -47,7 +51,6 @@ import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlin.time.Clock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -56,6 +59,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlin.jvm.JvmOverloads
+import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -72,6 +76,7 @@ public class AnthropicClientSettings(
     public val baseUrl: String = "https://api.anthropic.com",
     public val apiVersion: String = "2023-06-01",
     public val messagesPath: String = "v1/messages",
+    public val modelsPath: String = "v1/models",
     public val timeoutConfig: ConnectionTimeoutConfig = ConnectionTimeoutConfig()
 )
 
@@ -93,7 +98,7 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
     private val settings: AnthropicClientSettings = AnthropicClientSettings(),
     baseClient: HttpClient = HttpClient(),
     private val clock: Clock = Clock.System
-) : LLMClient {
+) : LLMClient() {
 
     private companion object {
         private val logger = KotlinLogging.logger { }
@@ -142,10 +147,10 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
 
     override suspend fun execute(prompt: Prompt, model: LLModel, tools: List<ToolDescriptor>): List<Message.Response> {
         logger.debug { "Executing prompt: $prompt with tools: $tools and model: $model" }
-        require(model.capabilities.contains(LLMCapability.Completion)) {
+        require(model.supports(LLMCapability.Completion)) {
             "Model ${model.id} does not support chat completions"
         }
-        require(model.capabilities.contains(LLMCapability.Tools)) {
+        require(model.supports(LLMCapability.Tools)) {
             "Model ${model.id} does not support tools"
         }
 
@@ -175,7 +180,7 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
         tools: List<ToolDescriptor>
     ): Flow<StreamFrame> {
         logger.debug { "Executing streaming prompt: $prompt with model: $model with tools: ${tools.map { it.name }}" }
-        require(model.capabilities.contains(LLMCapability.Completion)) {
+        require(model.supports(LLMCapability.Completion)) {
             "Model ${model.id} does not support chat completions"
         }
 
@@ -218,15 +223,30 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                         AnthropicStreamEventType.CONTENT_BLOCK_START.value -> {
                             when (val contentBlock = response.contentBlock) {
                                 is AnthropicContent.Text -> {
-                                    emitAppend(contentBlock.text)
+                                    emitTextDelta(
+                                        text = contentBlock.text,
+                                        index = response.index
+                                            ?: throw LLMClientException(
+                                                clientName,
+                                                "Text index is missing"
+                                            )
+                                    )
                                 }
 
                                 is AnthropicContent.ToolUse -> {
-                                    upsertToolCall(
-                                        index = response.index
-                                            ?: throw LLMClientException(clientName, "Tool index is missing"),
+                                    emitToolCallDelta(
                                         id = contentBlock.id,
                                         name = contentBlock.name,
+                                        index = response.index
+                                            ?: throw LLMClientException(clientName, "Tool index is missing"),
+                                    )
+                                }
+
+                                is AnthropicContent.Thinking -> {
+                                    emitReasoningDelta(
+                                        text = contentBlock.thinking,
+                                        index = response.index
+                                            ?: throw LLMClientException(clientName, "Thinking index is missing")
                                     )
                                 }
 
@@ -242,19 +262,29 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                                 // Handles deltas for tool calls and text
 
                                 when (delta.type) {
-                                    AnthropicStreamDeltaContentType.INPUT_JSON_DELTA.value -> {
-                                        upsertToolCall(
+                                    AnthropicStreamDeltaContentType.TEXT_DELTA.value -> {
+                                        emitTextDelta(
+                                            delta.text
+                                                ?: throw LLMClientException(clientName, "Text delta is missing"),
                                             index = response.index
-                                                ?: throw LLMClientException(clientName, "Tool index is missing"),
-                                            args = delta.partialJson
-                                                ?: throw LLMClientException(clientName, "Tool args are missing")
                                         )
                                     }
 
-                                    AnthropicStreamDeltaContentType.TEXT_DELTA.value -> {
-                                        emitAppend(
-                                            delta.text
-                                                ?: throw LLMClientException(clientName, "Text delta is missing")
+                                    AnthropicStreamDeltaContentType.INPUT_JSON_DELTA.value -> {
+                                        emitToolCallDelta(
+                                            args = delta.partialJson
+                                                ?: throw LLMClientException(clientName, "Tool args are missing"),
+                                            index = response.index
+                                                ?: throw LLMClientException(clientName, "Tool index is missing"),
+                                        )
+                                    }
+
+                                    AnthropicStreamDeltaContentType.THINKING_DELTA.value -> {
+                                        emitReasoningDelta(
+                                            text = delta.thinking
+                                                ?: throw LLMClientException(clientName, "Reasoning delta is missing"),
+                                            index = response.index
+                                                ?: throw LLMClientException(clientName, "Reasoning index is missing")
                                         )
                                     }
 
@@ -266,7 +296,21 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                         }
 
                         AnthropicStreamEventType.CONTENT_BLOCK_STOP.value -> {
-                            tryEmitPendingToolCall()
+                            response.delta?.let { delta ->
+                                when (delta.type) {
+                                    AnthropicStreamDeltaContentType.TEXT_DELTA.value -> {
+                                        tryEmitPendingText()
+                                    }
+
+                                    AnthropicStreamDeltaContentType.INPUT_JSON_DELTA.value -> {
+                                        tryEmitPendingToolCall()
+                                    }
+
+                                    AnthropicStreamDeltaContentType.THINKING_DELTA.value -> {
+                                        tryEmitPendingReasoning()
+                                    }
+                                }
+                            }
                         }
 
                         AnthropicStreamEventType.MESSAGE_DELTA.value -> {
@@ -299,7 +343,7 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                     cause = e
                 )
             }
-        }
+        }.requireEndFrame()
     }
 
     @OptIn(ExperimentalUuidApi::class)
@@ -526,7 +570,7 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                 )
 
                 is ContentPart.Image -> {
-                    require(model.capabilities.contains(LLMCapability.Vision.Image)) {
+                    require(model.supports(LLMCapability.Vision.Image)) {
                         "Model ${model.id} does not support images"
                     }
 
@@ -543,7 +587,7 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                 }
 
                 is ContentPart.File -> {
-                    require(model.capabilities.contains(LLMCapability.Document)) {
+                    require(model.supports(LLMCapability.Document)) {
                         "Model ${model.id} does not support files"
                     }
 
@@ -628,6 +672,7 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
         return when {
             // Fix the situation when the model decides to both call tools and talk
             responses.any { it is Message.Tool.Call } -> responses.filterIsInstance<Message.Tool.Call>()
+
             // If no messages where returned, return an empty message and check stopReason
             responses.isEmpty() -> listOf(
                 Message.Assistant(
@@ -643,6 +688,7 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                     )
                 )
             )
+
             // Just return responses
             else -> responses
         }
@@ -651,13 +697,19 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
     /**
      * Helper function to get the type map for a parameter type without using smart casting
      */
+    @OptIn(InternalAgentToolsApi::class)
     private fun getTypeMapForParameter(type: ToolParameterType): JsonObject {
         return when (type) {
             ToolParameterType.Boolean -> JsonObject(mapOf("type" to JsonPrimitive("boolean")))
+
             ToolParameterType.Float -> JsonObject(mapOf("type" to JsonPrimitive("number")))
+
             ToolParameterType.Integer -> JsonObject(mapOf("type" to JsonPrimitive("integer")))
+
             ToolParameterType.String -> JsonObject(mapOf("type" to JsonPrimitive("string")))
+
             ToolParameterType.Null -> JsonObject(mapOf("type" to JsonPrimitive("null")))
+
             is ToolParameterType.Enum -> JsonObject(
                 mapOf(
                     "type" to JsonPrimitive("string"),
@@ -707,11 +759,25 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
                 JsonObject(objectMap)
             }
 
-            is ToolParameterType.AnyOf -> throw LLMClientException(
-                clientName,
-                "AnyOf type is not supported"
-            )
+            is ToolParameterType.AnyOf -> {
+                // FIXME this is hack, represent union types properly in ToolDescriptor
+                type.hackRepresentAnyOfWithNullAsTypeUnionWithNull(::getTypeMapForParameter)
+                    ?: throw LLMClientException(clientName, "AnyOf type is not supported")
+            }
         }
+    }
+
+    public override suspend fun models(): List<LLModel> {
+        logger.debug { "Fetching available models from Anthropic" }
+
+        val response = httpClient.get(
+            path = settings.modelsPath,
+            responseType = AnthropicModelsResponse::class
+        )
+
+        val modelsById = AnthropicModels.modelsById()
+
+        return response.data.map { modelsById[it.id] ?: LLModel(id = it.id, provider = LLMProvider.Anthropic) }
     }
 
     /**

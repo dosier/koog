@@ -7,6 +7,8 @@ import ai.koog.prompt.executor.clients.google.GoogleModels.Gemini2_0FlashLite
 import ai.koog.prompt.executor.clients.google.GoogleModels.Gemini2_5Flash
 import ai.koog.prompt.executor.clients.google.GoogleModels.Gemini2_5FlashLite
 import ai.koog.prompt.executor.clients.google.GoogleModels.Gemini2_5Pro
+import ai.koog.prompt.executor.clients.google.GoogleModels.Gemini3_Flash_Preview
+import ai.koog.prompt.executor.clients.google.GoogleModels.Gemini3_Pro_Preview
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
@@ -25,6 +27,7 @@ import kotlin.jvm.JvmField
  * | [Gemini2_5Flash]            | Medium    | $0.15-$1.00 / $0.60-$3.50³   | Audio, Image, Video, Text, Tools | Text, Tools         |
  * | [Gemini2_5FlashLite]        | Fast      | $0.10-$0.30 / $0.40          | Audio, Image, Video, Text, Tools | Text, Tools         |
  * | [Gemini3_Pro_Preview]       | Slow      | $2.00-$4.00 / $12.00-$18.00  | Audio, Image, Video, Text, Tools | Text, Tools         |
+ * | [Gemini3_Flash_Preview]     | Fast      | $0.50 / $3                   | Audio, Image, Video, Text, Tools | Text, Tools         |
  *
  * @see <a href="modelcards.withgoogle.com/model-cards">
  */
@@ -161,6 +164,26 @@ public object GoogleModels : LLModelDefinitions {
     )
 
     /**
+     * Gemini 3 Flash Preview is the latest 3-series model,
+     * with Pro-level intelligence at the speed and pricing of Flash.
+     *
+     * Context window: 1 million tokens
+     * Knowledge cutoff: January 2025
+     * Input: Text, Image, Video, Audio, and PDF
+     * Output: Text
+     *
+     * @see <a href="https://ai.google.dev/gemini-api/docs/models/gemini-3-flash-preview">
+     */
+    @JvmField
+    public val Gemini3_Flash_Preview: LLModel = LLModel(
+        provider = LLMProvider.Google,
+        id = "gemini-3-flash-preview",
+        capabilities = fullCapabilities,
+        contextLength = 1_048_576,
+        maxOutputTokens = 65_536,
+    )
+
+    /**
      * Gemini 3 Pro is the first model in the new series, featuring advanced reasoning capabilities.
      * It uses `thinking_level` instead of `thinking_budget` for reasoning control.
      *
@@ -196,5 +219,34 @@ public object GoogleModels : LLModelDefinitions {
             capabilities = listOf(LLMCapability.Embed),
             contextLength = 2048,
         )
+    }
+
+    /**
+     * List of the supported models by the Google provider.
+     */
+    private val supportedModels: List<LLModel> = listOf(
+        Gemini2_0Flash,
+        Gemini2_0Flash001,
+        Gemini2_0FlashLite,
+        Gemini2_0FlashLite001,
+        Gemini2_5Pro,
+        Gemini2_5Flash,
+        Gemini2_5FlashLite,
+        Gemini3_Pro_Preview,
+        Gemini3_Flash_Preview,
+        Embeddings.GeminiEmbedding001,
+    )
+
+    /**
+     * List of custom models added to the Google provider.
+     */
+    private val customModels: MutableList<LLModel> = mutableListOf()
+
+    override val models: List<LLModel>
+        get() = supportedModels + customModels
+
+    override fun addCustomModel(model: LLModel) {
+        require(model.provider == LLMProvider.Google) { "Model provider must be Google" }
+        customModels.add(model)
     }
 }

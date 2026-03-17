@@ -5,24 +5,41 @@ import ai.koog.agents.core.dsl.builder.forwardTo
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.tools.ToolParameterType
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
+import ai.koog.agents.core.tools.annotations.LLMDescription
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.dsl.prompt
-import ai.koog.prompt.llm.OllamaModels
+import ai.koog.prompt.executor.ollama.client.OllamaModels
+import ai.koog.serialization.kotlinx.KotlinxSerializer
+import ai.koog.serialization.kotlinx.toKoogJSONObject
+import ai.koog.serialization.typeToken
+import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.test.runTest
-import kotlin.reflect.typeOf
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class AIAgentToolTest {
+    private val serializer = KotlinxSerializer()
+
+    @Serializable
+    data class SimpleData(
+        @property:LLMDescription("Test request description")
+        val value: String
+    )
 
     private class MockAgent(
         private val run: () -> String
-    ) : GraphAIAgent<String, String>(
+    ) : GraphAIAgent<SimpleData, SimpleData>(
         id = "mock_agent_id",
-        strategy = strategy("mock") { edge(nodeStart forwardTo nodeFinish transformed { run() }) },
-        promptExecutor = getMockExecutor { },
+        strategy = strategy("mock") {
+            edge(nodeStart forwardTo nodeFinish transformed { SimpleData(run()) })
+        },
+        promptExecutor = getMockExecutor(serializer) { },
         agentConfig = AIAgentConfig(
             prompt = prompt("test-prompt-id") {
                 system("You are a helpful assistant.")
@@ -30,13 +47,15 @@ class AIAgentToolTest {
             model = OllamaModels.Meta.LLAMA_3_2,
             maxAgentIterations = 5
         ),
-        inputType = typeOf<String>(),
-        outputType = typeOf<String>()
+        inputType = typeToken<String>(),
+        outputType = typeToken<String>()
     ) {
         constructor(result: String) : this({ result })
     }
 
     companion object {
+        val serializer = KotlinxSerializer()
+
         const val RESPONSE = "This is the agent's response"
         private fun createMockAgent(): MockAgent {
             return MockAgent(RESPONSE)
@@ -48,10 +67,9 @@ class AIAgentToolTest {
         val tool = agent.asTool(
             agentName = "testAgent",
             agentDescription = "Test agent description",
-            inputDescription = "Test request description"
         )
 
-        val argsJson = tool.encodeArgs("Test input")
+        val argsJson = tool.encodeArgs(SimpleData("Test input"), serializer)
     }
 
     @OptIn(InternalAgentToolsApi::class)
@@ -60,7 +78,6 @@ class AIAgentToolTest {
         val tool = agent.asTool(
             agentName = "testAgent",
             agentDescription = "Test agent description",
-            inputDescription = "Test request description"
         )
 
         assertEquals("testAgent", tool.descriptor.name)
@@ -76,7 +93,6 @@ class AIAgentToolTest {
         val tool = agent.asTool(
             agentName = "testAgent",
             agentDescription = "Test agent description",
-            inputDescription = "Test request description"
         )
         assertEquals("testAgent", tool.descriptor.name)
     }
@@ -84,11 +100,11 @@ class AIAgentToolTest {
     @OptIn(InternalAgentToolsApi::class)
     @Test
     fun testAsToolExecution() = runTest {
-        val args = tool.decodeArgs(argsJson)
+        val args = tool.decodeArgs(argsJson, serializer)
         val result = tool.execute(args)
 
         assertTrue(result.successful)
-        assertEquals(RESPONSE, result.result)
+        assertEquals(SimpleData(RESPONSE), result.result)
         assertNotNull(result.result)
         assertEquals(null, result.errorMessage)
     }
@@ -102,10 +118,9 @@ class AIAgentToolTest {
         val tool = agent.asTool(
             agentName = "testAgent",
             agentDescription = "Test agent description",
-            inputDescription = "Test request description"
         )
 
-        val args = tool.decodeArgs(argsJson)
+        val args = tool.decodeArgs(argsJson, serializer)
         val result = tool.execute(args)
 
         assertEquals(false, result.successful)
@@ -122,21 +137,19 @@ class AIAgentToolTest {
     @OptIn(InternalAgentToolsApi::class)
     @Test
     fun testAsToolResultSerialization() = runTest {
-        val tool = agent.asTool(
-            agentName = "testAgent",
-            agentDescription = "Test agent description",
-            inputDescription = "Test request description"
+        val result = AIAgentTool.AgentToolResult(
+            successful = true,
+            result = SimpleData("This is the agent's response"),
         )
 
-        val args = tool.decodeArgs(argsJson)
-        val result = tool.execute(args)
+        val resultSerialized = buildJsonObject {
+            put("successful", true)
+            putJsonObject("result") {
+                put("value", "This is the agent's response")
+            }
+        }.toKoogJSONObject()
 
-        assertEquals(
-            AIAgentTool.AgentToolResult(
-                successful = true,
-                result = "This is the agent's response",
-            ),
-            result
-        )
+        tool.encodeResult(result, serializer) shouldBe resultSerialized
+        tool.decodeResult(resultSerialized, serializer) shouldBe result
     }
 }

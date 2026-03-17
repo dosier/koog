@@ -9,6 +9,7 @@ import ai.koog.prompt.executor.clients.deepseek.models.DeepSeekChatCompletionReq
 import ai.koog.prompt.executor.clients.deepseek.models.DeepSeekChatCompletionResponse
 import ai.koog.prompt.executor.clients.deepseek.models.DeepSeekChatCompletionStreamResponse
 import ai.koog.prompt.executor.clients.deepseek.models.DeepSeekModelsResponse
+import ai.koog.prompt.executor.clients.modelsById
 import ai.koog.prompt.executor.clients.openai.base.AbstractOpenAILLMClient
 import ai.koog.prompt.executor.clients.openai.base.OpenAIBaseSettings
 import ai.koog.prompt.executor.clients.openai.base.OpenAICompatibleToolDescriptorSchemaGenerator
@@ -20,12 +21,15 @@ import ai.koog.prompt.executor.clients.openai.base.models.OpenAIToolChoice
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.LLMChoice
+import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
-import ai.koog.prompt.streaming.StreamFrameFlowBuilder
+import ai.koog.prompt.streaming.StreamFrame
+import ai.koog.prompt.streaming.buildStreamFrameFlow
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
-import kotlin.time.Clock
+import kotlinx.coroutines.flow.Flow
 import kotlin.jvm.JvmOverloads
+import kotlin.time.Clock
 
 /**
  * Configuration settings for connecting to the DeepSeek API.
@@ -67,11 +71,6 @@ public class DeepSeekLLMClient @JvmOverloads constructor(
 
     private companion object {
         private val staticLogger = KotlinLogging.logger { }
-
-        init {
-            // On class load register custom OpenAI JSON schema generators for structured output.
-            registerOpenAIJsonSchemaGenerators(LLMProvider.DeepSeek)
-        }
     }
 
     /**
@@ -140,23 +139,36 @@ public class DeepSeekLLMClient @JvmOverloads constructor(
     override fun decodeResponse(data: String): DeepSeekChatCompletionResponse =
         json.decodeFromString(data)
 
-    override suspend fun StreamFrameFlowBuilder.processStreamingChunk(chunk: DeepSeekChatCompletionStreamResponse) {
-        chunk.choices.firstOrNull()?.let { choice ->
-            choice.delta.content?.let { emitAppend(it) }
-            choice.delta.toolCalls?.forEach { toolCall ->
-                val index = toolCall.index
-                val id = toolCall.id
-                val name = toolCall.function?.name
-                val arguments = toolCall.function?.arguments
-                upsertToolCall(index, id, name, arguments)
+    override fun processStreamingResponse(
+        response: Flow<DeepSeekChatCompletionStreamResponse>
+    ): Flow<StreamFrame> = buildStreamFrameFlow {
+        var finishReason: String? = null
+        var metaInfo: ResponseMetaInfo? = null
+
+        response.collect { chunk ->
+            chunk.choices.firstOrNull()?.let { choice ->
+                choice.delta.content?.let { emitTextDelta(it) }
+
+                choice.delta.toolCalls?.forEach { toolCall ->
+                    val id = toolCall.id
+                    val name = toolCall.function?.name
+                    val arguments = toolCall.function?.arguments
+                    val index = toolCall.index
+                    emitToolCallDelta(id, name, arguments, index)
+                }
+
+                choice.finishReason?.let { finishReason = it }
             }
-            choice.finishReason?.let { emitEnd(it, createMetaInfo(chunk.usage)) }
+
+            chunk.usage?.let { metaInfo = createMetaInfo(chunk.usage) }
         }
+
+        emitEnd(finishReason, metaInfo)
     }
 
     override fun createResponseFormat(schema: LLMParams.Schema?, model: LLModel): OpenAIResponseFormat? {
         return schema?.let {
-            require(it.capability in model.capabilities) {
+            require(model.supports(it.capability)) {
                 "Model ${model.id} does not support structured output schema ${it.name}"
             }
             when (it) {
@@ -176,14 +188,16 @@ public class DeepSeekLLMClient @JvmOverloads constructor(
      *
      * @return A list of string identifiers representing the available models.
      */
-    public override suspend fun models(): List<String> {
+    public override suspend fun models(): List<LLModel> {
         logger.debug { "Fetching available models from DeepSeek" }
 
-        val openAIResponse = httpClient.get(
+        val models = httpClient.get(
             path = settings.modelsPath,
             responseType = DeepSeekModelsResponse::class
         )
 
-        return openAIResponse.data.map { it.id }
+        val modelsById = DeepSeekModels.modelsById()
+
+        return models.data.map { modelsById[it.id] ?: LLModel(provider = llmProvider(), id = it.id) }
     }
 }

@@ -2,8 +2,8 @@ package ai.koog.agents.core.feature.model.events
 
 import ai.koog.agents.core.agent.execution.AgentExecutionInfo
 import ai.koog.agents.core.feature.model.AIAgentError
-import kotlin.time.Clock
 import kotlinx.serialization.Serializable
+import kotlin.time.Clock
 
 /**
  * Represents an event triggered when an AI agent starts executing a strategy.

@@ -2,14 +2,13 @@ package ai.koog.agents.example.streaming
 
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.core.agent.GraphAIAgent.FeatureContext
-import ai.koog.agents.core.dsl.builder.forwardTo
+import ai.koog.agents.core.dsl.builder.node
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.dsl.extension.nodeExecuteMultipleTools
 import ai.koog.agents.core.dsl.extension.nodeLLMRequestStreamingAndSendResults
 import ai.koog.agents.core.dsl.extension.onMultipleToolCalls
 import ai.koog.agents.core.environment.ReceivedToolResult
 import ai.koog.agents.core.tools.ToolRegistry
-import ai.koog.agents.core.tools.reflect.asTools
 import ai.koog.agents.example.ApiKeyService
 import ai.koog.agents.example.simpleapi.Switch
 import ai.koog.agents.example.simpleapi.SwitchTools
@@ -36,7 +35,7 @@ suspend fun main() {
                     println("\n🔧 Using ${context.toolName} with ${context.toolArgs}... ")
                 }
                 onLLMStreamingFrameReceived { context ->
-                    (context.streamFrame as? StreamFrame.Append)?.let { frame ->
+                    (context.streamFrame as? StreamFrame.TextDelta)?.let { frame ->
                         print(frame.text)
                     }
                 }
@@ -87,7 +86,7 @@ private fun anthropicAgent(
 ) = AIAgent(
     promptExecutor = executor,
     strategy = streamingWithToolsStrategy(),
-    llmModel = AnthropicModels.Sonnet_3_7,
+    llmModel = AnthropicModels.Opus_4_6,
     systemPrompt = "You're responsible for running a Switch and perform operations on it by request",
     temperature = 0.0,
     toolRegistry = toolRegistry,

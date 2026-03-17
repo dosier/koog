@@ -9,7 +9,8 @@ import ai.koog.agents.snapshot.providers.InMemoryPersistenceStorageProvider
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.model.PromptExecutor
-import ai.koog.prompt.llm.OllamaModels
+import ai.koog.prompt.executor.ollama.client.OllamaModels
+import ai.koog.serialization.kotlinx.KotlinxSerializer
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.Test
  * These tests verify that the agent can create checkpoints and jump to specific execution points.
  */
 class SimpleGraphCheckpointTest {
+    private val serializer = KotlinxSerializer()
 
     /**
      * Test that the agent jumps to a specific execution point when using the checkpoint feature.
@@ -28,7 +30,7 @@ class SimpleGraphCheckpointTest {
     @Test
     fun `test agent jumps to execution point when using checkpoint`() = runTest {
         // Create a mock executor for testing
-        val mockExecutor: PromptExecutor = getMockExecutor {
+        val mockExecutor: PromptExecutor = getMockExecutor(serializer) {
             // No specific mock responses needed for this test
         }
 
@@ -59,7 +61,7 @@ class SimpleGraphCheckpointTest {
         }
 
         // Run the agent
-        val result = agent.run("Start the test")
+        val result = agent.run("Start the test", null)
 
         // Verify that the result contains the expected output from the teleported node
         assertEquals(
@@ -83,7 +85,7 @@ class SimpleGraphCheckpointTest {
         val checkpointStorageProvider = InMemoryPersistenceStorageProvider()
 
         // Create a mock executor for testing
-        val mockExecutor: PromptExecutor = getMockExecutor {
+        val mockExecutor: PromptExecutor = getMockExecutor(serializer) {
             // No specific mock responses needed for this test
         }
 
@@ -119,7 +121,7 @@ class SimpleGraphCheckpointTest {
         }
 
         // Run the agent
-        agent.run("Start the test")
+        agent.run("Start the test", null)
 
         // Verify that a checkpoint was created and saved
         val checkpoint = checkpointStorageProvider.getCheckpoints(agent.id).firstOrNull()
@@ -132,7 +134,7 @@ class SimpleGraphCheckpointTest {
     fun test_checkpoint_persists_history() = runTest {
         val checkpointStorageProvider = InMemoryPersistenceStorageProvider()
 
-        val mockExecutor: PromptExecutor = getMockExecutor {
+        val mockExecutor: PromptExecutor = getMockExecutor(serializer) {
             // No specific mock responses needed for this test
         }
 
@@ -167,7 +169,7 @@ class SimpleGraphCheckpointTest {
         }
 
         // Run the agent
-        agent.run("Start the test")
+        agent.run("Start the test", null)
 
         // Verify that a checkpoint was created and saved
         val checkpoint = checkpointStorageProvider.getCheckpoints(agent.id).firstOrNull() ?: error("checkpoint is null")

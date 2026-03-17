@@ -23,14 +23,6 @@ public object OpenRouterModels : LLModelDefinitions {
     )
 
     /**
-     * Structured output support and tool choice.
-     */
-    private val additionalCapabilities: List<LLMCapability> = listOf(
-        LLMCapability.Schema.JSON.Standard,
-        LLMCapability.ToolChoice
-    )
-
-    /**
      * Multimodal capabilities including vision support.
      * Extends standard capabilities with image vision processing.
      */
@@ -154,7 +146,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val Claude4_5Haiku: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "anthropic/claude-haiku-4.5",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 200_000,
         maxOutputTokens = 64_000,
     )
@@ -167,7 +162,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val Claude4_5Sonnet: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "anthropic/claude-sonnet-4.5",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 1_000_000,
         maxOutputTokens = 64_000,
     )
@@ -180,7 +178,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val Claude4_5Opus: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "anthropic/claude-opus-4.5",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 200_000,
         maxOutputTokens = 32_000,
     )
@@ -194,7 +195,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val GPT4oMini: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "openai/gpt-4o-mini",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 128_000,
         maxOutputTokens = 16_400,
     )
@@ -208,7 +212,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val GPT5Chat: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "openai/gpt-5-chat",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 400_000,
         maxOutputTokens = 128_000,
     )
@@ -224,7 +231,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val GPT5: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "openai/gpt-5",
-        capabilities = standardCapabilities + additionalCapabilities,
+        capabilities = standardCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 400_000,
     )
 
@@ -239,7 +249,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val GPT5Mini: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "openai/gpt-5-mini",
-        capabilities = standardCapabilities + additionalCapabilities,
+        capabilities = standardCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 400_000,
     )
 
@@ -254,7 +267,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val GPT5Nano: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "openai/gpt-5-nano",
-        capabilities = standardCapabilities + additionalCapabilities,
+        capabilities = standardCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 400_000,
     )
 
@@ -269,7 +285,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val GPT_OSS_120b: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "openai/gpt-oss-120b",
-        capabilities = standardCapabilities + additionalCapabilities,
+        capabilities = standardCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 400_000,
     )
 
@@ -284,7 +303,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val GPT4: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "openai/gpt-4",
-        capabilities = standardCapabilities + additionalCapabilities,
+        capabilities = standardCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 32_768,
     )
 
@@ -296,7 +318,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val GPT4o: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "openai/gpt-4o",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 128_000,
     )
 
@@ -311,7 +336,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val GPT4Turbo: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "openai/gpt-4-turbo",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 128_000,
     )
 
@@ -325,7 +353,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val GPT35Turbo: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "openai/gpt-3.5-turbo",
-        capabilities = standardCapabilities + additionalCapabilities,
+        capabilities = standardCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 16_385,
     )
 
@@ -338,7 +369,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val GPT5_2: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "openai/gpt-5.2",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 400_000,
     )
 
@@ -366,7 +400,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val Llama3: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "meta/llama-3-70b",
-        capabilities = standardCapabilities + additionalCapabilities,
+        capabilities = standardCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 8_000,
     )
 
@@ -380,7 +417,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val Llama3Instruct: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "meta/llama-3-70b-instruct",
-        capabilities = standardCapabilities + additionalCapabilities,
+        capabilities = standardCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 8_000,
     )
 
@@ -486,7 +526,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val Gemini2_5FlashLite: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "google/gemini-2.5-flash-lite",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 1_048_576,
         maxOutputTokens = 65_600,
     )
@@ -499,7 +542,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val Gemini2_5Flash: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "google/gemini-2.5-flash",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 1_048_576,
         maxOutputTokens = 65_600,
     )
@@ -512,7 +558,10 @@ public object OpenRouterModels : LLModelDefinitions {
     public val Gemini2_5Pro: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "google/gemini-2.5-pro",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.Schema.JSON.Standard,
+            LLMCapability.ToolChoice
+        ),
         contextLength = 1_048_576,
         maxOutputTokens = 65_600,
     )
@@ -525,7 +574,9 @@ public object OpenRouterModels : LLModelDefinitions {
     public val Qwen2_5: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "qwen/qwen-2.5-72b-instruct",
-        capabilities = standardCapabilities + additionalCapabilities,
+        capabilities = standardCapabilities + listOf(
+            LLMCapability.ToolChoice
+        ),
         contextLength = 131_072,
         maxOutputTokens = 8_192,
     )
@@ -539,8 +590,257 @@ public object OpenRouterModels : LLModelDefinitions {
     public val Qwen3VL: LLModel = LLModel(
         provider = LLMProvider.OpenRouter,
         id = "qwen/qwen3-vl-8b-instruct",
-        capabilities = multimodalCapabilities + additionalCapabilities,
+        capabilities = multimodalCapabilities + listOf(
+            LLMCapability.ToolChoice
+        ),
         contextLength = 131_072,
         maxOutputTokens = 33_000,
     )
+
+    /**
+     * List of the supported models by the OpenRouter provider.
+     */
+    private val supportedModels: List<LLModel> = listOf(
+        // Phi Models
+        Phi4Reasoning,
+
+        // Claude Models
+        Claude3Opus,
+        Claude3Sonnet,
+        Claude3Haiku,
+        Claude3_5Sonnet,
+        Claude3_7Sonnet,
+        Claude4Sonnet,
+        Claude4_1Opus,
+        Claude4_5Haiku,
+        Claude4_5Sonnet,
+        Claude4_5Opus,
+        Claude3VisionSonnet,
+        Claude3VisionOpus,
+        Claude3VisionHaiku,
+
+        // OpenAI Models
+        GPT35Turbo,
+        GPT4,
+        GPT4o,
+        GPT4oMini,
+        GPT4Turbo,
+        GPT5,
+        GPT5Mini,
+        GPT5Nano,
+        GPT5Chat,
+        GPT_OSS_120b,
+        GPT5_2,
+        GPT5_2Pro,
+        Llama3,
+        Llama3Instruct,
+
+        // Mistral Models
+        Mistral7B,
+        Mixtral8x7B,
+
+        // DeepSeek Models
+        DeepSeekV30324,
+
+        // Gemini 2.5 Models
+        Gemini2_5FlashLite,
+        Gemini2_5Flash,
+        Gemini2_5Pro,
+
+        // Qwen Models
+        Qwen2_5,
+        Qwen3VL,
+    )
+
+    /**
+     * List of custom models added to the OpenRouter provider.
+     */
+    private val customModels: MutableList<LLModel> = mutableListOf()
+
+    override val models: List<LLModel>
+        get() = supportedModels + customModels
+
+    override fun addCustomModel(model: LLModel) {
+        require(model.provider == LLMProvider.OpenRouter) { "Model provider must be OpenRouter" }
+        customModels.add(model)
+    }
+
+    public object Embeddings {
+
+        // OpenAI Models
+        @JvmField
+        public val OpenAITextEmbedding3Small: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "openai/text-embedding-3-small",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 8_192
+        )
+
+        @JvmField
+        public val OpenAITextEmbedding3Large: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "openai/text-embedding-3-large",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 8_192
+        )
+
+        @JvmField
+        public val OpenAITextEmbeddingAda002: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "openai/text-embedding-ada-002",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 8_192
+        )
+
+        // Google Models
+        @JvmField
+        public val GoogleGeminiEmbedding001: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "google/gemini-embedding-001",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 20_000
+        )
+
+        // Mistral Models
+        @JvmField
+        public val MistralEmbed2312: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "mistralai/mistral-embed-2312",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 8_192
+        )
+
+        @JvmField
+        public val MistralCodestralEmbed2505: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "mistralai/codestral-embed-2505",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 8_192
+        )
+
+        // Qwen Models
+        @JvmField
+        public val Qwen3Embedding8B: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "qwen/qwen3-embedding-8b",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 32_000
+        )
+
+        @JvmField
+        public val Qwen3Embedding4B: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "qwen/qwen3-embedding-4b",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 32_768
+        )
+
+        // BAAI Models
+        @JvmField
+        public val BaaiGbeBaseEnV15: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "baai/bge-base-en-v1.5",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+
+        @JvmField
+        public val BaaiBgeLargeEnV15: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "baai/bge-large-en-v1.5",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+
+        @JvmField
+        public val BaaiBgeM3: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "baai/bge-m3",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 8_192
+        )
+
+        // Thenlper Models
+        @JvmField
+        public val ThenlperGteBase: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "thenlper/gte-base",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+
+        @JvmField
+        public val ThenlperGteLarge: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "thenlper/gte-large",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+
+        // Intfloat Models
+        @JvmField
+        public val IntfloatE5BaseV2: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "intfloat/e5-base-v2",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+
+        @JvmField
+        public val IntfloatE5LargeV2: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "intfloat/e5-large-v2",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+
+        @JvmField
+        public val IntfloatMultilingualE5Large: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "intfloat/multilingual-e5-large",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+
+        // Sentence Transformers Models
+        @JvmField
+        public val SentenceTransformersAllMiniLmL6V2: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "sentence-transformers/all-minilm-l6-v2",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+
+        @JvmField
+        public val SentenceTransformersAllMiniLmL12V2: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "sentence-transformers/all-minilm-l12-v2",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+
+        @JvmField
+        public val SentenceTransformersAllMpnetBaseV2: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "sentence-transformers/all-mpnet-base-v2",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+
+        @JvmField
+        public val SentenceTransformersMultiQaMpnetBaseDotV1: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "sentence-transformers/multi-qa-mpnet-base-dot-v1",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+
+        @JvmField
+        public val SentenceTransformersParaphraseMiniLmL6V2: LLModel = LLModel(
+            provider = LLMProvider.OpenRouter,
+            id = "sentence-transformers/paraphrase-minilm-l6-v2",
+            capabilities = listOf(LLMCapability.Embed),
+            contextLength = 512
+        )
+    }
 }

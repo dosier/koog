@@ -23,7 +23,6 @@ import ai.koog.prompt.executor.clients.openai.base.models.OpenAIUsage
 import ai.koog.prompt.executor.clients.openai.base.structure.OpenAIBasicJsonSchemaGenerator
 import ai.koog.prompt.executor.clients.openai.base.structure.OpenAIStandardJsonSchemaGenerator
 import ai.koog.prompt.llm.LLMCapability
-import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.AttachmentContent
 import ai.koog.prompt.message.ContentPart
@@ -32,11 +31,7 @@ import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.streaming.StreamFrame
-import ai.koog.prompt.streaming.StreamFrameFlowBuilder
-import ai.koog.prompt.streaming.buildStreamFrameFlow
-import ai.koog.prompt.structure.RegisteredBasicJsonSchemaGenerators
-import ai.koog.prompt.structure.RegisteredStandardJsonSchemaGenerators
-import ai.koog.prompt.structure.annotations.InternalStructuredOutputApi
+import ai.koog.prompt.streaming.requireEndFrame
 import io.github.oshai.kotlinlogging.KLogger
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
@@ -49,11 +44,12 @@ import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlin.time.Clock
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
 import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.jvm.JvmOverloads
+import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 import ai.koog.prompt.executor.clients.openai.base.models.Content as OpenAIContent
@@ -88,19 +84,14 @@ public abstract class AbstractOpenAILLMClient<TResponse : OpenAIBaseLLMResponse,
     protected val clock: Clock = Clock.System,
     protected val logger: KLogger,
     private val toolsConverter: OpenAICompatibleToolDescriptorSchemaGenerator,
-) : LLMClient {
+) : LLMClient() {
 
-    protected companion object {
+    override fun getBasicJsonSchemaGenerator(): OpenAIBasicJsonSchemaGenerator {
+        return OpenAIBasicJsonSchemaGenerator
+    }
 
-        /**
-         * Register basic and standard openai json schema generator for given provider
-         */
-        @Suppress("RedundantVisibilityModifier") // it is required here due to explicitApi
-        @OptIn(InternalStructuredOutputApi::class)
-        public fun registerOpenAIJsonSchemaGenerators(llmProvider: LLMProvider) {
-            RegisteredBasicJsonSchemaGenerators[llmProvider] = OpenAIBasicJsonSchemaGenerator
-            RegisteredStandardJsonSchemaGenerators[llmProvider] = OpenAIStandardJsonSchemaGenerator
-        }
+    override fun getStandardJsonSchemaGenerator(): OpenAIStandardJsonSchemaGenerator {
+        return OpenAIStandardJsonSchemaGenerator
     }
 
     private val chatCompletionsPath: String = settings.chatCompletionsPath
@@ -165,10 +156,10 @@ public abstract class AbstractOpenAILLMClient<TResponse : OpenAIBaseLLMResponse,
     protected abstract fun decodeResponse(data: String): TResponse
 
     /**
-     * Processes a provider-specific streaming response chunk.
+     * Processes a provider-specific streaming response.
      * Must be implemented by concrete client classes.
      */
-    protected abstract suspend fun StreamFrameFlowBuilder.processStreamingChunk(chunk: TStreamResponse)
+    protected abstract fun processStreamingResponse(response: Flow<TStreamResponse>): Flow<StreamFrame>
 
     override suspend fun execute(prompt: Prompt, model: LLModel, tools: List<ToolDescriptor>): List<Message.Response> {
         val response = getResponse(prompt, model, tools)
@@ -193,8 +184,8 @@ public abstract class AbstractOpenAILLMClient<TResponse : OpenAIBaseLLMResponse,
             stream = true
         )
 
-        return buildStreamFrameFlow {
-            try {
+        return try {
+            channelFlow {
                 httpClient.sse(
                     path = chatCompletionsPath,
                     request = request,
@@ -202,18 +193,16 @@ public abstract class AbstractOpenAILLMClient<TResponse : OpenAIBaseLLMResponse,
                     dataFilter = { it != "[DONE]" },
                     decodeStreamingResponse = ::decodeStreamingResponse,
                     processStreamingChunk = { it }
-                ).collect {
-                    processStreamingChunk(it)
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                throw LLMClientException(
-                    clientName = clientName,
-                    message = e.message,
-                    cause = e
-                )
-            }
+                ).collect { send(it) }
+            }.let { processStreamingResponse(it) }.requireEndFrame()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw LLMClientException(
+                clientName = clientName,
+                message = e.message,
+                cause = e
+            )
         }
     }
 
@@ -480,7 +469,7 @@ public abstract class AbstractOpenAILLMClient<TResponse : OpenAIBaseLLMResponse,
     /**
      * Creates ResponseMetaInfo from usage data.
      * Should be used by concrete implementations when processing responses.
-     * 
+     *
      * Includes cache metrics from OpenAI's automatic prompt caching when available.
      * OpenAI automatically caches prompts longer than 1,024 tokens and returns
      * cached token counts in the usage response.
@@ -498,7 +487,7 @@ public abstract class AbstractOpenAILLMClient<TResponse : OpenAIBaseLLMResponse,
 
     protected open fun createResponseFormat(schema: LLMParams.Schema?, model: LLModel): OpenAIResponseFormat? {
         return schema?.let {
-            require(it.capability in model.capabilities) {
+            require(model.supports(it.capability)) {
                 "Model ${model.id} does not support structured output schema ${it.name}"
             }
             when (it) {

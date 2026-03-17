@@ -15,6 +15,7 @@ import ai.koog.agents.testing.feature.withTesting
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.message.Message
+import ai.koog.serialization.kotlinx.KotlinxSerializer
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import org.junit.jupiter.params.ParameterizedTest
@@ -24,6 +25,8 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 class SimpleAgentMockedTest {
+    private val serializer = KotlinxSerializer()
+
     companion object {
         @JvmStatic
         fun getInputMessage(): Array<String> = arrayOf(
@@ -52,14 +55,7 @@ class SimpleAgentMockedTest {
     val results = mutableListOf<Any?>()
     val llmRequestedTools = mutableListOf<String>()
 
-    val testExecutor = getMockExecutor(
-        toolRegistry = ToolRegistry {
-            tool(ErrorTool)
-            tool(ConditionalTool)
-            tool(SayToUser)
-            tool(ExitTool)
-        }
-    ) {
+    val testExecutor = getMockExecutor(serializer) {
         mockLLMToolCall(ExitTool, ExitTool.Args("Bye-bye.")) onRequestEquals "Please exit."
         mockLLMToolCall(SayToUser, SayToUser.Args("Fine, and you?")) onRequestEquals "Hello, how are you?"
         mockLLMAnswer("Hello, I'm good.") onRequestEquals "Repeat after me: Hello, I'm good."
@@ -196,7 +192,7 @@ class SimpleAgentMockedTest {
             }
         )
 
-        agent.run("Write a Kotlin function to calculate factorial.")
+        agent.run("Write a Kotlin function to calculate factorial.", null)
 
         assertTrue(succeedToolCalls.isNotEmpty(), "No tools were called")
         assertTrue(succeedToolCalls.contains(SayToUser.name), "The ${SayToUser.name} tool was not called")
@@ -227,7 +223,7 @@ class SimpleAgentMockedTest {
         // Calling a non-existent tool returns an observation with an error
         // instead of throwing an exception, allowing the agent to handle it gracefully
         try {
-            agent.run(errorTrigger)
+            agent.run(errorTrigger, null)
         } catch (e: Throwable) {
             errors.add(e.toAgentError())
         }
@@ -269,7 +265,7 @@ class SimpleAgentMockedTest {
         )
 
         try {
-            agent.run(errorTrigger)
+            agent.run(errorTrigger, null)
         } catch (e: Throwable) {
             errors.add(e.toAgentError())
         }
@@ -329,7 +325,7 @@ class SimpleAgentMockedTest {
             tool(SayToUser)
         }
 
-        val loopExecutor = getMockExecutor {
+        val loopExecutor = getMockExecutor(serializer) {
             mockLLMToolCall(SayToUser, SayToUser.Args("Looping...")) onRequestEquals "Make the agent loop."
         }
 
@@ -347,7 +343,7 @@ class SimpleAgentMockedTest {
         )
 
         try {
-            agent.run("Make the agent loop.")
+            agent.run("Make the agent loop.", null)
         } catch (e: Throwable) {
             errors.add(e.toAgentError())
         }

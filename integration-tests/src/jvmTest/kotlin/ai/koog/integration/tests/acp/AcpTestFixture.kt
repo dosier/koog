@@ -52,13 +52,14 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.time.Clock
+import kotlinx.datetime.Clock
 import kotlinx.io.asSink
 import kotlinx.io.asSource
 import kotlinx.io.buffered
 import kotlinx.serialization.json.JsonElement
 import java.nio.channels.Channels
 import java.nio.channels.Pipe
+import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -148,7 +149,7 @@ suspend fun setupAcpClient(
     agentInfo.authMethods shouldBe authMethods
 
     if (authenticate && authMethods.isNotEmpty()) {
-        clientProtocol.sendRequest<AuthenticateRequest, AuthenticateResponse>(
+        clientProtocol.sendRequest(
             AcpMethod.AgentMethods.Authenticate,
             AuthenticateRequest(authMethods.first().id)
         )

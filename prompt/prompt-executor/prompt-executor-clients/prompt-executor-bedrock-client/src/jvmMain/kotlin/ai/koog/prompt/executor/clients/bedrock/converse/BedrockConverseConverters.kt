@@ -48,13 +48,13 @@ import aws.sdk.kotlin.services.bedrockruntime.model.VideoSource
 import aws.smithy.kotlin.runtime.content.Document
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.flow.Flow
-import kotlin.time.Clock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlin.time.Clock
 import aws.sdk.kotlin.services.bedrockruntime.model.Message as BedrockMessage
 import aws.sdk.kotlin.services.bedrockruntime.model.Tool as BedrockTool
 import aws.sdk.kotlin.services.bedrockruntime.model.ToolChoice as BedrockToolChoice
@@ -355,7 +355,7 @@ internal object BedrockConverseConverters {
 
                 is ConverseStreamOutput.ContentBlockStart -> when (val start = chunk.value.start) {
                     is ContentBlockStart.ToolUse -> {
-                        upsertToolCall(
+                        emitToolCallDelta(
                             index = chunk.value.contentBlockIndex,
                             id = start.value.toolUseId,
                             name = start.value.name,
@@ -377,11 +377,11 @@ internal object BedrockConverseConverters {
 
                 is ConverseStreamOutput.ContentBlockDelta -> when (val delta = chunk.value.delta) {
                     is ContentBlockDelta.Text -> {
-                        emitAppend(delta.value)
+                        emitTextDelta(delta.value)
                     }
 
                     is ContentBlockDelta.ToolUse -> {
-                        upsertToolCall(
+                        emitToolCallDelta(
                             index = chunk.value.contentBlockIndex,
                             args = delta.value.input
                         )
@@ -451,7 +451,7 @@ internal object BedrockConverseConverters {
                 throw IllegalArgumentException("Bedrock Converse API doesn't support audio content.")
 
             is ContentPart.File -> {
-                require(LLMCapability.Document in model.capabilities) {
+                require(model.supports(LLMCapability.Document)) {
                     "${model.id} doesn't support documents"
                 }
 
@@ -477,7 +477,7 @@ internal object BedrockConverseConverters {
             }
 
             is ContentPart.Image -> {
-                require(LLMCapability.Vision.Image in model.capabilities) {
+                require(model.supports(LLMCapability.Vision.Image)) {
                     "${model.id} doesn't support images"
                 }
 
@@ -500,7 +500,7 @@ internal object BedrockConverseConverters {
             }
 
             is ContentPart.Video -> {
-                require(LLMCapability.Vision.Video in model.capabilities) {
+                require(model.supports(LLMCapability.Vision.Video)) {
                     "${model.id} doesn't support videos"
                 }
 

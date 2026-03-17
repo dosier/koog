@@ -43,7 +43,6 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
-import kotlin.time.Clock
 import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 import kotlin.random.Random.Default.nextInt
@@ -55,6 +54,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.milliseconds
 
 class BedrockLLMClientTest {
@@ -160,8 +160,8 @@ class BedrockLLMClientTest {
         }
 
         assertNotNull(exception.message, "Exception message should not be null")
-        assertTrue(exception.message!!.contains("withInferencePrefix() can only be used with Bedrock models"))
-        assertTrue(exception.message!!.contains("model provider is Anthropic"))
+        assertTrue(exception.message!!.contains("withInferenceProfile() can only be used with Bedrock models"))
+        assertTrue(exception.message!!.contains("AnthropicLLMProvider"))
     }
 
     @Test
@@ -240,10 +240,11 @@ class BedrockLLMClientTest {
             clock = Clock.System
         )
 
-        // Verify that older Claude models don't support tools
-        val olderClaudeModel = BedrockModels.AnthropicClaude21
+        // Verify that Claude Haiku supports tools
+        val claudeModel = BedrockModels.AnthropicClaude4_5Haiku
+        // This should not throw an exception for models with tool support
         assertFails {
-            client.execute(prompt, olderClaudeModel, tools)
+            client.execute(prompt, claudeModel, tools)
         }
     }
 
@@ -342,7 +343,7 @@ class BedrockLLMClientTest {
             val prompt = Prompt.build("test") {
                 user("This is a test prompt")
             }
-            val model = BedrockModels.AnthropicClaude3Sonnet
+            val model = BedrockModels.AnthropicClaude4Sonnet
 
             val moderationResult = client.moderate(prompt, model)
             assertEquals(true, moderationResult.isHarmful)
@@ -371,7 +372,7 @@ class BedrockLLMClientTest {
         val prompt = Prompt.build("test") {
             user("This is a test prompt")
         }
-        val model = BedrockModels.AnthropicClaude3Sonnet
+        val model = BedrockModels.AnthropicClaude4Sonnet
 
         // Verify that moderate method throws an exception because moderationGuardrailsSettings wasn't provided
         assertFailsWith<LLMClientException> {
@@ -401,7 +402,7 @@ class BedrockLLMClientTest {
             val prompt = Prompt.build("test") {
                 user("hi")
             }
-            val model = BedrockModels.AnthropicClaude3Sonnet
+            val model = BedrockModels.AnthropicClaude4Sonnet
 
             client.moderate(prompt, model)
 
@@ -434,7 +435,7 @@ class BedrockLLMClientTest {
                 user("What is 2+2?")
                 assistant("2+2 equals 4")
             }
-            val model = BedrockModels.AnthropicClaude3Sonnet
+            val model = BedrockModels.AnthropicClaude4Sonnet
 
             client.moderate(prompt, model)
 
@@ -470,7 +471,7 @@ class BedrockLLMClientTest {
             val prompt = Prompt.build("test") {
                 assistant("Hello, how can I help?")
             }
-            val model = BedrockModels.AnthropicClaude3Sonnet
+            val model = BedrockModels.AnthropicClaude4Sonnet
 
             client.moderate(prompt, model)
 
@@ -693,14 +694,6 @@ class BedrockLLMClientTest {
         )
         assertEquals(BedrockModelFamilies.AmazonNova, client.getBedrockModelFamily(novaModel))
 
-        val jambaModel = LLModel(
-            provider = LLMProvider.Bedrock,
-            id = "ai21.jamba-instruct-v1:0",
-            capabilities = listOf(LLMCapability.Completion),
-            contextLength = 256_000
-        )
-        assertEquals(BedrockModelFamilies.AI21Jamba, client.getBedrockModelFamily(jambaModel))
-
         val llamaModel = LLModel(
             provider = LLMProvider.Bedrock,
             id = "meta.llama3-1-8b-instruct-v1:0",
@@ -724,6 +717,14 @@ class BedrockLLMClientTest {
             contextLength = 512
         )
         assertEquals(BedrockModelFamilies.Cohere, client.getBedrockModelFamily(cohereModel))
+
+        val kimiModel = LLModel(
+            provider = LLMProvider.Bedrock,
+            id = "moonshot.kimi-k2-thinking",
+            capabilities = listOf(LLMCapability.Completion, LLMCapability.Tools),
+            contextLength = 256_000
+        )
+        assertEquals(BedrockModelFamilies.MoonshotKimi, client.getBedrockModelFamily(kimiModel))
     }
 
     @Test
@@ -873,7 +874,7 @@ class BedrockLLMClientTest {
 
     @Test
     fun `BedrockClientSettings with fallback model family works correctly`() {
-        val fallbackFamily = BedrockModelFamilies.AI21Jamba
+        val fallbackFamily = BedrockModelFamilies.AmazonNova
         val settings = BedrockClientSettings(
             region = BedrockRegions.EU_WEST_1.regionCode,
             endpointUrl = "https://custom.endpoint.com",
@@ -892,5 +893,81 @@ class BedrockLLMClientTest {
         assertEquals("https://custom.endpoint.com", settings.endpointUrl)
         assertEquals(5, settings.maxRetries)
         assertEquals(true, settings.enableLogging)
+    }
+
+    @Test
+    fun `MoonshotKimiK2Thinking model has correct properties`() {
+        val model = BedrockModels.MoonshotKimiK2Thinking
+
+        assertEquals("moonshot.kimi-k2-thinking", model.id)
+        assertEquals(LLMProvider.Bedrock, model.provider)
+        assertEquals(256_000, model.contextLength)
+        val capabilities = assertNotNull(model.capabilities)
+        assertTrue(capabilities.contains(LLMCapability.Completion))
+        assertTrue(capabilities.contains(LLMCapability.Tools))
+        assertTrue(capabilities.contains(LLMCapability.Temperature))
+    }
+
+    @Test
+    fun `Kimi K2 Thinking model requires Converse API for execute`() = runTest {
+        val client = BedrockLLMClient(
+            identityProvider = StaticCredentialsProvider {
+                accessKeyId = "test-key"
+                secretAccessKey = "test-secret"
+            },
+            settings = BedrockClientSettings(
+                region = BedrockRegions.US_EAST_1.regionCode,
+                apiMethod = BedrockAPIMethod.InvokeModel
+            ),
+            clock = Clock.System
+        )
+
+        val prompt = Prompt.build("test") {
+            user("Hello, Kimi!")
+        }
+
+        val exception = assertFailsWith<LLMClientException> {
+            client.execute(prompt, BedrockModels.MoonshotKimiK2Thinking, emptyList())
+        }
+
+        assertTrue(exception.message!!.contains("requires the Bedrock Converse API"))
+        assertTrue(exception.message!!.contains("BedrockAPIMethod.Converse"))
+    }
+
+    @Test
+    fun `Kimi K2 Thinking model requires Converse API for executeStreaming`() = runTest {
+        val client = BedrockLLMClient(
+            identityProvider = StaticCredentialsProvider {
+                accessKeyId = "test-key"
+                secretAccessKey = "test-secret"
+            },
+            settings = BedrockClientSettings(
+                region = BedrockRegions.US_EAST_1.regionCode,
+                apiMethod = BedrockAPIMethod.InvokeModel
+            ),
+            clock = Clock.System
+        )
+
+        val prompt = Prompt.build("test") {
+            user("Hello, Kimi!")
+        }
+
+        val exception = assertFailsWith<LLMClientException> {
+            client.executeStreaming(prompt, BedrockModels.MoonshotKimiK2Thinking, emptyList()).toList()
+        }
+
+        assertTrue(exception.message!!.contains("requires the Bedrock Converse API"))
+        assertTrue(exception.message!!.contains("BedrockAPIMethod.Converse"))
+    }
+
+    @Test
+    fun `MoonshotKimiK2Thinking model has no inference profile prefix`() {
+        val model = BedrockModels.MoonshotKimiK2Thinking
+
+        // The model should NOT have any inference profile prefix
+        assertFalse(model.id.startsWith("us."))
+        assertFalse(model.id.startsWith("eu."))
+        assertFalse(model.id.startsWith("global."))
+        assertEquals("moonshot.kimi-k2-thinking", model.id)
     }
 }

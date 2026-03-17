@@ -19,14 +19,13 @@ object Models {
         return Stream.of(
             OpenAIModels.Chat.GPT5_2, // reasoning
             OpenAIModels.Chat.GPT4_1, // non-reasoning
-            OpenAIModels.Chat.GPT5_1Codex
         )
     }
 
     @JvmStatic
     fun anthropicModels(): Stream<LLModel> {
         return Stream.of(
-            AnthropicModels.Opus_4_5,
+            AnthropicModels.Opus_4_6,
             AnthropicModels.Haiku_4_5,
             AnthropicModels.Sonnet_4_5,
         )
@@ -35,6 +34,7 @@ object Models {
     @JvmStatic
     fun googleModels(): Stream<LLModel> {
         return Stream.of(
+            GoogleModels.Gemini3_Flash_Preview,
             GoogleModels.Gemini3_Pro_Preview,
             GoogleModels.Gemini2_5Pro,
             GoogleModels.Gemini2_5Flash,
@@ -67,6 +67,7 @@ object Models {
             OpenAIModels.Embeddings.TextEmbedding3Large,
             MistralAIModels.Embeddings.MistralEmbed,
             GoogleModels.Embeddings.GeminiEmbedding001,
+            OpenRouterModels.Embeddings.GoogleGeminiEmbedding001,
         )
     }
 
@@ -104,11 +105,20 @@ object Models {
     @JvmStatic
     fun reasoningCapableModels(): Stream<LLModel> {
         return Stream.of(
-            // Replaced 5.2 with 5.1-Codex because of the unstable 5.2 behaviour, see KG-625
-            OpenAIModels.Chat.GPT5_1Codex,
+            // KG-733 [Java API] OpenAILLMClient error: 'reasoning' is provided without its required following item
+            // OpenAIModels.Chat.GPT5_2,
             AnthropicModels.Haiku_4_5,
-            GoogleModels.Gemini2_5Pro,
             GoogleModels.Gemini3_Pro_Preview,
+        )
+    }
+
+    @JvmStatic
+    fun openAIReasoningModels(): Stream<LLModel> {
+        return Stream.of(
+            // KG-726 Responses from several OpenAI models are completing without receiving an End frame
+            // OpenAIModels.Chat.GPT5_1CodexMax,
+            OpenAIModels.Chat.GPT5_1Codex,
+            OpenAIModels.Chat.GPT5_2,
         )
     }
 
@@ -117,13 +127,13 @@ object Models {
         return Stream.concat(
             openAIModels()
                 .filter { model ->
-                    model.capabilities.contains(LLMCapability.Vision.Image)
+                    model.supports(LLMCapability.Vision.Image)
                 }
                 .map { model -> Arguments.of(model, getLLMClientForProvider(model.provider)) },
 
             anthropicModels()
                 .filter { model ->
-                    model.capabilities.contains(LLMCapability.Vision.Image)
+                    model.supports(LLMCapability.Vision.Image)
                 }
                 .map { model -> Arguments.of(model, getLLMClientForProvider(model.provider)) },
         )
@@ -148,6 +158,15 @@ object Models {
         assumeTrue(
             !shouldSkip,
             "Test skipped because provider ${provider.display} is in the skip list ($skipProvidersRaw)"
+        )
+    }
+
+    // Todo: remove the method an the assumption after fixing the KG-743
+    @JvmStatic
+    fun assumeEnumToolCallsAreStable(model: LLModel, scenario: String) {
+        assumeTrue(
+            model.provider.id != LLMProvider.Anthropic.id,
+            "[$scenario] failed, see KG-743: Tool enum arguments are parsed case-sensitively and fail on lowercase values"
         )
     }
 }

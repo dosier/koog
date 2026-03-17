@@ -2,8 +2,10 @@ package ai.koog.agents.features.opentelemetry.feature.span
 
 import ai.koog.agents.core.dsl.builder.forwardTo
 import ai.koog.agents.core.dsl.builder.strategy
+import ai.koog.agents.core.dsl.builder.subgraph
 import ai.koog.agents.core.dsl.extension.nodeLLMRequest
 import ai.koog.agents.core.dsl.extension.onAssistantMessage
+import ai.koog.agents.features.opentelemetry.AgentType
 import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI
 import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI.MockToolCallResponse
 import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI.assistantMessage
@@ -25,21 +27,27 @@ import ai.koog.agents.utils.HiddenString
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.RequestMetaInfo
 import ai.koog.prompt.tokenizer.SimpleRegexBasedTokenizer
+import ai.koog.serialization.kotlinx.KotlinxSerializer
 import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
 class OpenTelemetryInferenceSpanTest : OpenTelemetryTestBase() {
+    private val serializer = KotlinxSerializer()
 
-    @Test
-    fun `test inference spans are collected`() = runTest {
+    @ParameterizedTest
+    @EnumSource(AgentType::class)
+    fun `test inference spans are collected`(agentType: AgentType) = runTest {
         val userInput = OpenTelemetryTestAPI.Parameter.USER_PROMPT_PARIS
         val mockLLMResponse = OpenTelemetryTestAPI.Parameter.MOCK_LLM_RESPONSE_PARIS
 
         val collectedTestData = runAgentWithSingleLLMCallStrategy(
             userPrompt = userInput,
             mockLLMResponse = mockLLMResponse,
-            verbose = true
+            verbose = true,
+            agentType = agentType
         )
 
         val runId = collectedTestData.lastRunId
@@ -103,8 +111,9 @@ class OpenTelemetryInferenceSpanTest : OpenTelemetryTestBase() {
         assertSpans(expectedSpans, actualSpans)
     }
 
-    @Test
-    fun `test inference spans with tool calls collect events`() = runTest {
+    @ParameterizedTest
+    @EnumSource(AgentType::class)
+    fun `test inference spans with tool calls collect events`(agentType: AgentType) = runTest {
         val userInput = OpenTelemetryTestAPI.Parameter.USER_PROMPT_PARIS
         val toolCallId = "tool-call-id"
         val location = "Paris"
@@ -122,7 +131,8 @@ class OpenTelemetryInferenceSpanTest : OpenTelemetryTestBase() {
             userPrompt = userInput,
             mockToolCallResponse = mockToolCallResponse,
             mockLLMResponse = mockLLMResponse,
-            verbose = true
+            verbose = true,
+            agentType = agentType
         )
 
         val runId = collectedTestData.lastRunId
@@ -250,8 +260,9 @@ class OpenTelemetryInferenceSpanTest : OpenTelemetryTestBase() {
         assertSpans(expectedSpans, actualSpans)
     }
 
-    @Test
-    fun `test inference spans with verbose logging disabled`() = runTest {
+    @ParameterizedTest
+    @EnumSource(AgentType::class)
+    fun `test inference spans with verbose logging disabled`(agentType: AgentType) = runTest {
         val userInput = OpenTelemetryTestAPI.Parameter.USER_PROMPT_PARIS
         val toolCallId = "tool-call-id"
         val location = "Paris"
@@ -269,7 +280,8 @@ class OpenTelemetryInferenceSpanTest : OpenTelemetryTestBase() {
             userPrompt = userInput,
             mockToolCallResponse = mockToolCallResponse,
             mockLLMResponse = mockLLMResponse,
-            verbose = false
+            verbose = false,
+            agentType = agentType
         )
 
         val runId = collectedTestData.lastRunId
@@ -404,7 +416,7 @@ class OpenTelemetryInferenceSpanTest : OpenTelemetryTestBase() {
             edge(nodeLLMCall forwardTo nodeFinish onAssistantMessage { true })
         }
 
-        val executor = getMockExecutor(clock = testClock) {
+        val executor = getMockExecutor(serializer, testClock) {
             mockLLMAnswer(subgraphLLMResponse) onRequestEquals userInput
             mockLLMAnswer(rootLLMResponse) onRequestEquals subgraphLLMResponse
         }
@@ -543,7 +555,7 @@ class OpenTelemetryInferenceSpanTest : OpenTelemetryTestBase() {
 
         // Use tokenizer in the prompt executor to count tokens
         val tokenizer = SimpleRegexBasedTokenizer()
-        val mockExecutor = getMockExecutor(clock = testClock, tokenizer = tokenizer) {
+        val mockExecutor = getMockExecutor(serializer, testClock, tokenizer) {
             mockLLMAnswer(mockLLMResponse) onRequestEquals userInput
         }
 

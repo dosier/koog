@@ -6,13 +6,14 @@ import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
+import ai.koog.serialization.kotlinx.KotlinxSerializer
 import junit.framework.TestCase.assertTrue
-import kotlin.time.Clock
-import kotlin.time.Instant
 import org.junit.jupiter.api.Test
 import java.util.function.BiFunction
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 /**
  * Tests for Java API patterns in AIAgent builder.
@@ -20,6 +21,8 @@ import kotlin.test.assertNotNull
  * matching the patterns used in the koog-java-exp-01 project.
  */
 class JavaAPIAgentBuilderTest {
+    private val serializer = KotlinxSerializer()
+
     companion object {
         val ts: Instant = Instant.parse("2023-01-01T00:00:00Z")
 
@@ -38,7 +41,7 @@ class JavaAPIAgentBuilderTest {
     @Test
     fun testBuilderWithPromptExecutor() {
         // Test that promptExecutor can be set
-        val mockExecutor = getMockExecutor { }
+        val mockExecutor = getMockExecutor(serializer) { }
         val agent = AIAgent.builder()
             .promptExecutor(mockExecutor)
             .llmModel(OpenAIModels.Chat.GPT4o)
@@ -64,7 +67,7 @@ class JavaAPIAgentBuilderTest {
         )
 
         val agent = AIAgent.builder()
-            .promptExecutor(getMockExecutor { })
+            .promptExecutor(getMockExecutor(serializer) { })
             .agentConfig(config)
             .build()
 
@@ -80,7 +83,7 @@ class JavaAPIAgentBuilderTest {
         val toolRegistry = ToolRegistry.builder().build()
 
         val agent = AIAgent.builder()
-            .promptExecutor(getMockExecutor { })
+            .promptExecutor(getMockExecutor(serializer) { })
             .llmModel(OpenAIModels.Chat.GPT4o)
             .toolRegistry(toolRegistry)
             .build()
@@ -110,7 +113,7 @@ class JavaAPIAgentBuilderTest {
         )
 
         val agent = AIAgent.builder()
-            .promptExecutor(getMockExecutor { })
+            .promptExecutor(getMockExecutor(serializer) { })
             .agentConfig(config)
             .build()
 
@@ -137,10 +140,10 @@ class JavaAPIAgentBuilderTest {
                 "echoStrategy",
                 BiFunction { _: AIAgentFunctionalContext, input: String -> "Echo: $input" }
             )
-            .promptExecutor(getMockExecutor { })
+            .promptExecutor(getMockExecutor(serializer) { })
             .build()
 
-        val result = agent.run("hello", null)
+        val result = agent.javaNonSuspendRun("hello", null, null)
         assertEquals("Echo: hello", result)
     }
 
@@ -167,10 +170,10 @@ class JavaAPIAgentBuilderTest {
         val agent = AIAgent.builder()
             .agentConfig(config)
             .functionalStrategy(strategy)
-            .promptExecutor(getMockExecutor { })
+            .promptExecutor(getMockExecutor(serializer) { })
             .build()
 
-        val result = agent.run("data", null)
+        val result = agent.javaNonSuspendRun("data")
         assertEquals("Processed: data", result)
     }
 
@@ -188,7 +191,7 @@ class JavaAPIAgentBuilderTest {
         val toolRegistry = ToolRegistry.builder().build()
 
         val agent = AIAgent.builder()
-            .promptExecutor(getMockExecutor { })
+            .promptExecutor(getMockExecutor(serializer) { })
             .agentConfig(config)
             .toolRegistry(toolRegistry)
             .temperature(0.7)
@@ -219,7 +222,7 @@ class JavaAPIAgentBuilderTest {
         )
 
         val agent = AIAgent.builder()
-            .promptExecutor(getMockExecutor { })
+            .promptExecutor(getMockExecutor(serializer) { })
             .agentConfig(config1)
             .agentConfig(config2) // Should override config1
             .build()
@@ -234,7 +237,7 @@ class JavaAPIAgentBuilderTest {
         val toolRegistry = ToolRegistry.builder().build()
 
         val agent = AIAgent.builder()
-            .promptExecutor(getMockExecutor { })
+            .promptExecutor(getMockExecutor(serializer) { })
             .llmModel(OpenAIModels.Chat.GPT4o)
             .toolRegistry(toolRegistry)
             .systemPrompt("sys")

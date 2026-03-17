@@ -1,11 +1,12 @@
 package ai.koog.agents.features.opentelemetry
 
 import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.agent.AIAgentFunctionalStrategy
 import ai.koog.agents.core.agent.AIAgentService
-import ai.koog.agents.core.agent.GraphAIAgent
-import ai.koog.agents.core.agent.GraphAIAgentService
 import ai.koog.agents.core.agent.config.AIAgentConfig
 import ai.koog.agents.core.agent.entity.AIAgentGraphStrategy
+import ai.koog.agents.core.agent.entity.AIAgentStrategy
+import ai.koog.agents.core.agent.functionalStrategy
 import ai.koog.agents.core.dsl.builder.forwardTo
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.dsl.extension.nodeExecuteTool
@@ -17,12 +18,16 @@ import ai.koog.agents.core.tools.Tool
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI.Parameter.DEFAULT_AGENT_ID
 import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI.Parameter.DEFAULT_PROMPT_ID
+import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI.Parameter.MOCK_LLM_RESPONSE_PARIS
 import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI.Parameter.SYSTEM_PROMPT
 import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI.Parameter.TEMPERATURE
 import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI.Parameter.USER_PROMPT_PARIS
 import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI.Parameter.defaultModel
+import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI.Strategy.getSingleLLMCallStrategy
+import ai.koog.agents.features.opentelemetry.OpenTelemetryTestAPI.Strategy.getSingleToolCallStrategy
 import ai.koog.agents.features.opentelemetry.attribute.SpanAttributes
 import ai.koog.agents.features.opentelemetry.feature.OpenTelemetry
+import ai.koog.agents.features.opentelemetry.feature.OpenTelemetryConfig
 import ai.koog.agents.features.opentelemetry.mock.MockSpanExporter
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.dsl.prompt
@@ -32,20 +37,22 @@ import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
+import ai.koog.serialization.kotlinx.KotlinxSerializer
 import ai.koog.utils.io.use
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.time.Clock
-import kotlin.time.Instant
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.assertTrue
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 internal object OpenTelemetryTestAPI {
+    private val serializer = KotlinxSerializer()
 
     internal val testClock: Clock = object : Clock {
         override fun now(): Instant = Instant.parse("2023-01-01T00:00:00Z")
@@ -56,6 +63,7 @@ internal object OpenTelemetryTestAPI {
     internal object Parameter {
         internal const val DEFAULT_AGENT_ID = "test-agent-id"
         internal const val DEFAULT_PROMPT_ID = "test-prompt-id"
+        internal const val DEFAULT_STRATEGY_NAME = "test-strategy"
         internal val defaultModel = OpenAIModels.Chat.GPT4o
 
         internal const val SYSTEM_PROMPT = "You are the application that predicts weather"
@@ -76,21 +84,78 @@ internal object OpenTelemetryTestAPI {
         val toolCallId: String? = "tool-call-id",
     )
 
+    internal object Strategy {
+        internal val simpleGraphStrategy = strategy<String, String>(Parameter.DEFAULT_STRATEGY_NAME) {
+            nodeStart then nodeFinish
+        }
+        internal val simpleFunctionalStrategy =
+            functionalStrategy<String, String>(Parameter.DEFAULT_STRATEGY_NAME) { it }
+
+        internal fun getSimpleStrategy(agentType: AgentType) = when (agentType) {
+            AgentType.Graph -> simpleGraphStrategy
+            AgentType.Functional -> simpleFunctionalStrategy
+        }
+
+        internal val singleLLMCallGraphStrategy = strategy(Parameter.DEFAULT_STRATEGY_NAME) {
+            val nodeSendInput by nodeLLMRequest("test-llm-call")
+
+            edge(nodeStart forwardTo nodeSendInput)
+            edge(nodeSendInput forwardTo nodeFinish onAssistantMessage { true })
+        }
+        internal val singleLLMCallFunctionalStrategy =
+            functionalStrategy<String, String>(Parameter.DEFAULT_STRATEGY_NAME) { input ->
+                requestLLM(input).content
+            }
+
+        fun getSingleLLMCallStrategy(agentType: AgentType) = when (agentType) {
+            AgentType.Graph -> singleLLMCallGraphStrategy
+            AgentType.Functional -> singleLLMCallFunctionalStrategy
+        }
+
+        internal val singleToolCallGraphStrategy = strategy(Parameter.DEFAULT_STRATEGY_NAME) {
+            val nodeCallLLM by nodeLLMRequest("test-llm-call")
+            val nodeExecuteTool by nodeExecuteTool("test-tool-call")
+            val nodeSendToolResult by nodeLLMSendToolResult("test-node-llm-send-tool-result")
+
+            edge(nodeStart forwardTo nodeCallLLM)
+            edge(nodeCallLLM forwardTo nodeExecuteTool onToolCall { true })
+            edge(nodeCallLLM forwardTo nodeFinish onAssistantMessage { true })
+            edge(nodeExecuteTool forwardTo nodeSendToolResult)
+            edge(nodeSendToolResult forwardTo nodeFinish onAssistantMessage { true })
+            edge(nodeSendToolResult forwardTo nodeExecuteTool onToolCall { true })
+        }
+        internal val singleToolCallFunctionalStrategy =
+            functionalStrategy<String, String>(Parameter.DEFAULT_STRATEGY_NAME) { input ->
+                var result = requestLLM(input)
+
+                while (result is Message.Tool.Call) {
+                    result = sendToolResult(executeTool(result))
+                }
+
+                result.content
+            }
+
+        fun getSingleToolCallStrategy(agentType: AgentType) = when (agentType) {
+            AgentType.Graph -> singleToolCallGraphStrategy
+            AgentType.Functional -> singleToolCallFunctionalStrategy
+        }
+    }
+
+    internal val defaultMockExecutor = getMockExecutor(serializer, testClock) {
+        mockLLMAnswer(MOCK_LLM_RESPONSE_PARIS) onRequestEquals USER_PROMPT_PARIS
+    }
+
     //region Agents With Strategies
 
     internal suspend fun runAgentWithSingleLLMCallStrategy(
         userPrompt: String,
         mockLLMResponse: String,
         verbose: Boolean = true,
+        agentType: AgentType,
     ): OpenTelemetryTestData {
-        val strategy = strategy("test-single-llm-strategy") {
-            val nodeCallLLM by nodeLLMRequest("test-llm-call")
+        val strategy = getSingleLLMCallStrategy(agentType)
 
-            edge(nodeStart forwardTo nodeCallLLM)
-            edge(nodeCallLLM forwardTo nodeFinish onAssistantMessage { true })
-        }
-
-        val executor = getMockExecutor(clock = testClock) {
+        val executor = getMockExecutor(serializer, testClock) {
             mockLLMAnswer(mockLLMResponse) onRequestEquals userPrompt
         }
 
@@ -107,25 +172,15 @@ internal object OpenTelemetryTestAPI {
         mockToolCallResponse: MockToolCallResponse<TArgs, TResult>,
         mockLLMResponse: String,
         verbose: Boolean = true,
+        agentType: AgentType = AgentType.Graph,
     ): OpenTelemetryTestData {
-        val strategy = strategy("test-tool-calls-strategy") {
-            val nodeCallLLM by nodeLLMRequest("test-llm-call")
-            val nodeExecuteTool by nodeExecuteTool("test-tool-call")
-            val nodeSendToolResult by nodeLLMSendToolResult("test-node-llm-send-tool-result")
-
-            edge(nodeStart forwardTo nodeCallLLM)
-            edge(nodeCallLLM forwardTo nodeExecuteTool onToolCall { true })
-            edge(nodeCallLLM forwardTo nodeFinish onAssistantMessage { true })
-            edge(nodeExecuteTool forwardTo nodeSendToolResult)
-            edge(nodeSendToolResult forwardTo nodeFinish onAssistantMessage { true })
-            edge(nodeSendToolResult forwardTo nodeExecuteTool onToolCall { true })
-        }
+        val strategy = getSingleToolCallStrategy(agentType)
 
         val toolRegistry = ToolRegistry {
             tool(mockToolCallResponse.tool)
         }
 
-        val executor = getMockExecutor(clock = testClock) {
+        val executor = getMockExecutor(serializer, testClock) {
             // Mock tool call
             mockLLMToolCall(
                 tool = mockToolCallResponse.tool,
@@ -135,7 +190,7 @@ internal object OpenTelemetryTestAPI {
 
             // Mock response from the "send tool result" node
             mockLLMAnswer(mockLLMResponse) onRequestContains
-                mockToolCallResponse.tool.encodeResultToString(mockToolCallResponse.toolResult)
+                mockToolCallResponse.tool.encodeResultToString(mockToolCallResponse.toolResult, serializer)
         }
 
         return runAgentWithStrategy(
@@ -147,7 +202,7 @@ internal object OpenTelemetryTestAPI {
     }
 
     internal suspend fun runAgentWithStrategy(
-        strategy: AIAgentGraphStrategy<String, String>,
+        strategy: AIAgentStrategy<String, String, *>,
         agentId: String? = null,
         promptId: String? = null,
         model: LLModel? = null,
@@ -177,10 +232,8 @@ internal object OpenTelemetryTestAPI {
                 temperature = TEMPERATURE,
                 maxTokens = maxTokens,
             ) {
-                install(OpenTelemetry) {
-                    addSpanExporter(mockExporter)
-                    setVerbose(verbose)
-                }
+                addSpanExporter(mockExporter)
+                setVerbose(verbose)
             }.use { agent ->
                 agent.run(userPrompt ?: USER_PROMPT_PARIS)
             }
@@ -212,8 +265,8 @@ internal object OpenTelemetryTestAPI {
     //region Agents
 
     internal suspend fun createAgent(
-        agentId: String = "test-agent-id",
-        strategy: AIAgentGraphStrategy<String, String>,
+        agentId: String = DEFAULT_AGENT_ID,
+        strategy: AIAgentStrategy<String, String, *>,
         executor: PromptExecutor? = null,
         promptId: String? = null,
         toolRegistry: ToolRegistry? = null,
@@ -223,7 +276,7 @@ internal object OpenTelemetryTestAPI {
         systemPrompt: String? = null,
         userPrompt: String? = null,
         assistantPrompt: String? = null,
-        installFeatures: GraphAIAgent.FeatureContext.() -> Unit = { }
+        configureOtel: OpenTelemetryConfig.() -> Unit = { }
     ): AIAgent<String, String> {
         val agentService = createAgentService(
             strategy,
@@ -236,14 +289,14 @@ internal object OpenTelemetryTestAPI {
             systemPrompt,
             userPrompt,
             assistantPrompt,
-            installFeatures
+            configureOtel
         )
 
         return agentService.createAgent(id = agentId)
     }
 
     internal fun createAgentService(
-        strategy: AIAgentGraphStrategy<String, String>,
+        strategy: AIAgentStrategy<String, String, *>,
         executor: PromptExecutor? = null,
         promptId: String? = null,
         toolRegistry: ToolRegistry? = null,
@@ -253,15 +306,15 @@ internal object OpenTelemetryTestAPI {
         systemPrompt: String? = null,
         userPrompt: String? = null,
         assistantPrompt: String? = null,
-        installFeatures: GraphAIAgent.FeatureContext.() -> Unit = { }
-    ): GraphAIAgentService<String, String> {
+        configureOtel: OpenTelemetryConfig.() -> Unit = { }
+    ): AIAgentService<String, String, *> {
         val agentConfig = AIAgentConfig(
             prompt = prompt(
                 id = promptId ?: "Test prompt",
                 clock = testClock,
                 params = LLMParams(
                     temperature = temperature,
-                    maxTokens = maxTokens
+                    maxTokens = maxTokens,
                 )
             ) {
                 systemPrompt?.let { system(systemPrompt) }
@@ -271,14 +324,30 @@ internal object OpenTelemetryTestAPI {
             model = model ?: OpenAIModels.Chat.GPT4o,
             maxAgentIterations = 10,
         )
+        val promptExecutor = executor ?: getMockExecutor(serializer, testClock) { }
+        val toolRegistry = toolRegistry ?: ToolRegistry.EMPTY
 
-        return AIAgentService(
-            promptExecutor = executor ?: getMockExecutor(clock = testClock) { },
-            strategy = strategy,
-            agentConfig = agentConfig,
-            toolRegistry = toolRegistry ?: ToolRegistry { },
-            installFeatures = installFeatures,
-        )
+        return when (strategy) {
+            is AIAgentGraphStrategy -> AIAgentService(
+                promptExecutor = promptExecutor,
+                strategy = strategy,
+                agentConfig = agentConfig,
+                toolRegistry = toolRegistry
+            ) {
+                install(OpenTelemetry) { configureOtel() }
+            }
+
+            is AIAgentFunctionalStrategy -> AIAgentService(
+                promptExecutor = executor ?: getMockExecutor(serializer, testClock) { },
+                strategy = strategy,
+                agentConfig = agentConfig,
+                toolRegistry = toolRegistry
+            ) {
+                install(OpenTelemetry) { configureOtel() }
+            }
+
+            else -> throw IllegalArgumentException("Unsupported strategy type: ${strategy::class.simpleName}")
+        }
     }
 
     //endregion Agents

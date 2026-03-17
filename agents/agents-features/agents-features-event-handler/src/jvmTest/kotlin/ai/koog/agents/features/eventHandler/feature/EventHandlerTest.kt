@@ -1,9 +1,10 @@
 package ai.koog.agents.features.eventHandler.feature
 
 import ai.koog.agents.core.dsl.builder.AIAgentNodeDelegate
-import ai.koog.agents.core.dsl.builder.AIAgentSubgraphBuilderBase
 import ai.koog.agents.core.dsl.builder.forwardTo
+import ai.koog.agents.core.dsl.builder.node
 import ai.koog.agents.core.dsl.builder.strategy
+import ai.koog.agents.core.dsl.builder.subgraph
 import ai.koog.agents.core.dsl.extension.nodeExecuteTool
 import ai.koog.agents.core.dsl.extension.nodeLLMRequest
 import ai.koog.agents.core.dsl.extension.nodeLLMRequestStreamingAndSendResults
@@ -23,6 +24,7 @@ import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.message.Message
 import ai.koog.prompt.streaming.StreamFrame
+import ai.koog.serialization.kotlinx.KotlinxSerializer
 import ai.koog.utils.io.use
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -33,8 +35,10 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
+import kotlin.time.Instant
 
 class EventHandlerTest {
+    private val serializer = KotlinxSerializer()
 
     @Test
     fun `test event handler for agent without nodes and tools`() = runTest {
@@ -53,7 +57,7 @@ class EventHandlerTest {
                 install(EventHandler, eventsCollector.eventHandlerFeatureConfig)
             }
         ).use { agent ->
-            agent.run(agentInput)
+            agent.run(agentInput, null)
         }
 
         val runId = eventsCollector.runId
@@ -113,7 +117,7 @@ class EventHandlerTest {
         )
 
         val agentInput = "Hello, world!!!"
-        agent.run(agentInput)
+        agent.run(agentInput, null)
         agent.close()
 
         val runId = eventsCollector.runId
@@ -184,7 +188,7 @@ class EventHandlerTest {
             tool(dummyTool)
         }
 
-        val mockExecutor = getMockExecutor(clock = testClock) {
+        val mockExecutor = getMockExecutor(serializer, clock = testClock) {
             mockLLMToolCall(dummyTool, DummyTool.Args("test")) onRequestEquals userPrompt
             mockLLMAnswer(mockResponse) onRequestContains dummyTool.result
         }
@@ -203,14 +207,14 @@ class EventHandlerTest {
         ) {
             install(EventHandler, eventsCollector.eventHandlerFeatureConfig)
         }.use { agent ->
-            agent.run(userPrompt)
+            agent.run(userPrompt, null)
         }
 
         val runId = eventsCollector.runId
         val dummyToolName = dummyTool.name
         val dummyToolDescription = dummyTool.descriptor.description
-        val dummyToolArgsEncoded = dummyTool.encodeArgs(DummyTool.Args("test"))
-        val dummyToolResultEncoded = dummyTool.encodeResult(dummyTool.result)
+        val dummyToolArgsEncoded = dummyTool.encodeArgs(DummyTool.Args("test"), serializer)
+        val dummyToolResultEncoded = dummyTool.encodeResult(dummyTool.result, serializer)
 
         val dummyToolReceivedToolResult = ReceivedToolResult(
             id = null,
@@ -322,7 +326,7 @@ class EventHandlerTest {
         )
 
         val agentInput = "Hello, world!!!"
-        agent.run(agentInput)
+        agent.run(agentInput, null)
         agent.close()
 
         val runId = eventsCollector.runId
@@ -405,7 +409,7 @@ class EventHandlerTest {
                 install(EventHandler, eventsCollector.eventHandlerFeatureConfig)
             }
         ).use { agent ->
-            val throwable = assertThrows<IllegalStateException> { agent.run(agentInput) }
+            val throwable = assertThrows<IllegalStateException> { agent.run(agentInput, null) }
             assertEquals(testErrorMessage, throwable.message)
         }
 
@@ -466,7 +470,7 @@ class EventHandlerTest {
         )
 
         val agentInput = "Hello, world!!!"
-        agent.run(agentInput)
+        agent.run(agentInput, null)
 
         val expectedEvents = listOf(
             "OnAgentStarting first (agent id: ${agent.id})",
@@ -527,7 +531,7 @@ class EventHandlerTest {
         val toolRegistry = ToolRegistry { tool(DummyTool()) }
 
         val testLLMResponse = "Default test response"
-        val executor = getMockExecutor {
+        val executor = getMockExecutor(serializer) {
             mockLLMAnswer(testLLMResponse).asDefaultResponse onUserRequestEquals "Test user message"
         }
 
@@ -545,7 +549,7 @@ class EventHandlerTest {
         ) {
             install(EventHandler, eventsCollector.eventHandlerFeatureConfig)
         }.use { agent ->
-            agent.run("")
+            agent.run("", null)
         }
 
         val runId = eventsCollector.runId
@@ -560,7 +564,9 @@ class EventHandlerTest {
 
         val expectedEvents = listOf(
             "OnLLMStreamingStarting (run id: $runId, prompt: $expectedPromptString, temperature: $temperature, model: ${model.eventString}, tools: [${toolRegistry.tools.joinToString { it.name }}])",
-            "OnLLMStreamingFrameReceived (run id: $runId, frame: Append(text=$testLLMResponse))",
+            "OnLLMStreamingFrameReceived (run id: $runId, frame: TextDelta(text=$testLLMResponse, index=0))",
+            "OnLLMStreamingFrameReceived (run id: $runId, frame: TextComplete(text=$testLLMResponse, index=0))",
+            "OnLLMStreamingFrameReceived (run id: $runId, frame: End(finishReason=null, metaInfo=ResponseMetaInfo(timestamp=${Instant.DISTANT_PAST}, totalTokensCount=null, inputTokensCount=null, outputTokensCount=null, additionalInfo={}, metadata=null)))",
             "OnLLMStreamingCompleted (run id: $runId, prompt: $expectedPromptString, temperature: $temperature, model: ${model.eventString}, tools: [${toolRegistry.tools.joinToString { it.name }}])",
         )
 
@@ -592,7 +598,7 @@ class EventHandlerTest {
 
         val testStreamingErrorMessage = "Test streaming error"
 
-        val testStreamingExecutor = object : PromptExecutor {
+        val testStreamingExecutor = object : PromptExecutor() {
             override suspend fun execute(
                 prompt: Prompt,
                 model: ai.koog.prompt.llm.LLModel,
@@ -630,7 +636,7 @@ class EventHandlerTest {
         ) {
             install(EventHandler, eventsCollector.eventHandlerFeatureConfig)
         }.use { agent ->
-            val throwable = assertThrows<IllegalStateException> { agent.run("") }
+            val throwable = assertThrows<IllegalStateException> { agent.run("", null) }
             assertEquals(testStreamingErrorMessage, throwable.message)
         }
 
@@ -683,7 +689,7 @@ class EventHandlerTest {
                 }
             }
         ).use { agent ->
-            agent.run(inputRequest)
+            agent.run(inputRequest, null)
         }
 
         val runId = eventsCollector.runId
@@ -728,7 +734,7 @@ class EventHandlerTest {
                 }
             }
         ).use { agent ->
-            assertFails { agent.run(inputRequest) }
+            assertFails { agent.run(inputRequest, null) }
         }
 
         assertEquals(subgraphNodeErrorMessage, agentThrowable.message)
@@ -746,7 +752,7 @@ class EventHandlerTest {
 
     //region Private Methods
 
-    private fun AIAgentSubgraphBuilderBase<*, *>.nodeException(name: String? = null): AIAgentNodeDelegate<String, Message.Response> =
+    private fun nodeException(name: String? = null): AIAgentNodeDelegate<String, Message.Response> =
         node(name) { throw IllegalStateException("Test exception") }
 
     //endregion Private Methods
