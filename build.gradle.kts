@@ -71,7 +71,7 @@ version = run {
         }
     }
 
-    "$baseVersion$feat"
+    "0.8.1-flopiq-5"
 }
 
 fun isCustomReleaseBranch(branchName: String): Boolean = branchName.matches(Regex("""^(release\/)?\d+\.\d+\.\d+$"""))
