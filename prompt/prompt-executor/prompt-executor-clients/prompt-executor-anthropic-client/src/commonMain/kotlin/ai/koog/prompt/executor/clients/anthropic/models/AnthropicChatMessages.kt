@@ -14,11 +14,15 @@ import kotlin.jvm.JvmInline
  * Represents the output configuration for Anthropic structured output.
  *
  * @property format The output format configuration, currently supporting JSON schema.
+ *   Optional — `output_config` may carry only an `effort` directive when no schema is set.
+ * @property effort Optional intelligence-vs-cost effort directive consumed by Claude Opus 4.7+
+ *   adaptive thinking. One of `low`, `medium`, `high`, `xhigh`, `max`. Validated server-side.
  */
 @InternalLLMClientApi
 @Serializable
 public data class AnthropicOutputConfig(
-    val format: AnthropicOutputFormat
+    val format: AnthropicOutputFormat? = null,
+    val effort: String? = null,
 )
 
 /**
@@ -484,6 +488,26 @@ public sealed interface AnthropicThinking {
     @Serializable
     @SerialName("disabled")
     public class Disabled : AnthropicThinking
+
+    /**
+     * Adaptive thinking — Claude decides per-request whether and how much to think.
+     * The recommended (and on Claude Opus 4.7 the only) thinking-on mode.
+     *
+     * Pair with the request-level `output_config.effort` directive (see
+     * [AnthropicOutputConfig.effort] / [AnthropicParams.effort]) to bias the
+     * intelligence-vs-cost tradeoff.
+     *
+     * @property display Optional display directive for the thinking content in the
+     *   response stream. `"summarized"` returns summary text; `"omitted"` (default
+     *   on Opus 4.7) leaves the `thinking` field empty while preserving signatures
+     *   for multi-turn continuity.
+     */
+    @Serializable
+    @SerialName("adaptive")
+    public class Adaptive(
+        @SerialName("display")
+        public val display: String? = null,
+    ) : AnthropicThinking
 }
 
 /**

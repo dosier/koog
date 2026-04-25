@@ -456,4 +456,99 @@ class AnthropicSerializationTest {
             }
                 """.trimIndent()
         }
+
+    @Test
+    fun `test serialization of adaptive thinking without display`() =
+        runWithBothJsonConfigurations("adaptive thinking without display") { json ->
+            val request = AnthropicMessageRequest(
+                model = "claude-opus-4-7",
+                messages = listOf(
+                    AnthropicMessage.User(
+                        content = listOf(AnthropicContent.Text("Hi"))
+                    )
+                ),
+                maxTokens = 1000,
+                thinking = AnthropicThinking.Adaptive()
+            )
+
+            val jsonString = json.encodeToString(AnthropicMessageRequestSerializer, request)
+
+            jsonString shouldEqualJson
+                // language=json
+                """
+            {
+              "model": "claude-opus-4-7",
+              "max_tokens": 1000,
+              "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "Hi"}]}
+              ],
+              "stream": false,
+              "thinking": {"type": "adaptive"}
+            }
+                """.trimIndent()
+        }
+
+    @Test
+    fun `test serialization of adaptive thinking with display summarized`() =
+        runWithBothJsonConfigurations("adaptive thinking with display") { json ->
+            val request = AnthropicMessageRequest(
+                model = "claude-opus-4-7",
+                messages = listOf(
+                    AnthropicMessage.User(
+                        content = listOf(AnthropicContent.Text("Hi"))
+                    )
+                ),
+                maxTokens = 1000,
+                thinking = AnthropicThinking.Adaptive(display = "summarized")
+            )
+
+            val jsonString = json.encodeToString(AnthropicMessageRequestSerializer, request)
+
+            jsonString shouldEqualJson
+                // language=json
+                """
+            {
+              "model": "claude-opus-4-7",
+              "max_tokens": 1000,
+              "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "Hi"}]}
+              ],
+              "stream": false,
+              "thinking": {"type": "adaptive", "display": "summarized"}
+            }
+                """.trimIndent()
+        }
+
+    @Test
+    fun `test serialization of output_config with effort only`() =
+        runWithBothJsonConfigurations("output_config effort only") { json ->
+            val request = AnthropicMessageRequest(
+                model = "claude-opus-4-7",
+                messages = listOf(
+                    AnthropicMessage.User(
+                        content = listOf(AnthropicContent.Text("Hi"))
+                    )
+                ),
+                maxTokens = 1000,
+                outputConfig = AnthropicOutputConfig(effort = "high"),
+                thinking = AnthropicThinking.Adaptive()
+            )
+
+            val jsonString = json.encodeToString(AnthropicMessageRequestSerializer, request)
+
+            jsonString shouldEqualJson
+                // language=json
+                """
+            {
+              "model": "claude-opus-4-7",
+              "max_tokens": 1000,
+              "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "Hi"}]}
+              ],
+              "output_config": {"effort": "high"},
+              "stream": false,
+              "thinking": {"type": "adaptive"}
+            }
+                """.trimIndent()
+        }
 }

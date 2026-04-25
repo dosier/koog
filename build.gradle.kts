@@ -71,7 +71,7 @@ version = run {
         }
     }
 
-    "0.8.1-flopiq-5"
+    "0.8.1-flopiq-6"
 }
 
 fun isCustomReleaseBranch(branchName: String): Boolean = branchName.matches(Regex("""^(release\/)?\d+\.\d+\.\d+$"""))

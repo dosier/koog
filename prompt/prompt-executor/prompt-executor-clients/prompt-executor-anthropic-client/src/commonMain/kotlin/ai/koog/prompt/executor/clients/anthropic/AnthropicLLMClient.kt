@@ -497,13 +497,16 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
             null -> null
         }
 
-        val outputConfig = anthropicParams.schema?.let { schema ->
+        val outputFormat = anthropicParams.schema?.let { schema ->
             require(schema is LLMParams.Schema.JSON) {
                 "Anthropic only supports JSON schemas for structured output"
             }
-            AnthropicOutputConfig(
-                format = AnthropicOutputFormat.JsonSchema(schema = schema.schema)
-            )
+            AnthropicOutputFormat.JsonSchema(schema = schema.schema)
+        }
+        val outputConfig = if (outputFormat != null || anthropicParams.effort != null) {
+            AnthropicOutputConfig(format = outputFormat, effort = anthropicParams.effort)
+        } else {
+            null
         }
 
         // Always include max_tokens as it's required by the API

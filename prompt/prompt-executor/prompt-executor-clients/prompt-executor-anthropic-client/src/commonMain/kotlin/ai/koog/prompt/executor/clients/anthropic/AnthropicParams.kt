@@ -21,6 +21,13 @@ internal fun LLMParams.toAnthropicParams(): AnthropicParams {
 }
 
 /**
+ * Valid values for the Anthropic `output_config.effort` directive (Claude Opus 4.7+).
+ * `xhigh` and `max` are Opus-4.7-only; the others are accepted by Opus 4.6 and Sonnet 4.6
+ * when paired with [AnthropicThinking.Adaptive].
+ */
+public val ANTHROPIC_EFFORT_VALUES: Set<String> = setOf("low", "medium", "high", "xhigh", "max")
+
+/**
  * Anthropic Messages API parameters layered on top of [LLMParams].
  *
  * @property temperature Sampling temperature in [0.0, 1.0]. Higher ⇒ more random;
@@ -42,6 +49,9 @@ internal fun LLMParams.toAnthropicParams(): AnthropicParams {
  * @property mcpServers MCP servers to be used in this request
  * @property serviceTier Determines whether to use priority capacity (if available) or standard capacity for this request.
  * @property thinking Configuration for enabling Claude's extended thinking.
+ * @property effort Optional intelligence-vs-cost effort directive. Wired into
+ *   `output_config.effort` on the wire. Only consumed by Claude Opus 4.7+ adaptive thinking.
+ *   Must be one of [ANTHROPIC_EFFORT_VALUES] when not null; rejected server-side otherwise.
  * @property cacheControl when automatic cache control provided, [AnthropicCacheControl] is added at the **request
  *   top level** and the API automatically applies the cache breakpoint to the last cacheable block.
  *   This is the recommended approach for multi-turn conversations where you don't need fine-grained
@@ -64,6 +74,7 @@ public class AnthropicParams(
     public val mcpServers: List<AnthropicMCPServerURLDefinition>? = null,
     public val serviceTier: AnthropicServiceTier? = null,
     public val thinking: AnthropicThinking? = null,
+    public val effort: String? = null,
     public val cacheControl: AnthropicCacheControl? = null,
 ) : LLMParams(
     temperature,
@@ -104,6 +115,13 @@ public class AnthropicParams(
                 "mcpServers supports at most 20 servers, but was ${mcpServers.size}"
             }
         }
+
+        // --- Effort ---
+        if (effort != null) {
+            require(effort in ANTHROPIC_EFFORT_VALUES) {
+                "effort must be one of $ANTHROPIC_EFFORT_VALUES, but was \"$effort\""
+            }
+        }
     }
 
     override fun copy(
@@ -131,6 +149,7 @@ public class AnthropicParams(
         mcpServers = mcpServers,
         serviceTier = serviceTier,
         thinking = thinking,
+        effort = effort,
         cacheControl = cacheControl,
     )
 
@@ -153,6 +172,7 @@ public class AnthropicParams(
         mcpServers: List<AnthropicMCPServerURLDefinition>? = this.mcpServers,
         serviceTier: AnthropicServiceTier? = this.serviceTier,
         thinking: AnthropicThinking? = this.thinking,
+        effort: String? = this.effort,
         cacheControl: AnthropicCacheControl? = this.cacheControl,
     ): AnthropicParams = AnthropicParams(
         temperature = temperature,
@@ -170,6 +190,7 @@ public class AnthropicParams(
         mcpServers = mcpServers,
         serviceTier = serviceTier,
         thinking = thinking,
+        effort = effort,
         cacheControl = cacheControl,
     )
 
@@ -192,6 +213,7 @@ public class AnthropicParams(
                 mcpServers == other.mcpServers &&
                 serviceTier == other.serviceTier &&
                 thinking == other.thinking &&
+                effort == other.effort &&
                 cacheControl == other.cacheControl
     }
 
@@ -200,7 +222,7 @@ public class AnthropicParams(
         speculation, schema, toolChoice, user,
         additionalProperties, topP, topK,
         stopSequences, container, mcpServers,
-        serviceTier, thinking, cacheControl
+        serviceTier, thinking, effort, cacheControl
     ).fold(0) { acc, element ->
         31 * acc + (element?.hashCode() ?: 0)
     }
@@ -222,6 +244,7 @@ public class AnthropicParams(
         append(", mcpServers=$mcpServers")
         append(", serviceTier=$serviceTier")
         append(", thinking=$thinking")
+        append(", effort=$effort")
         append(", automaticCacheControl=$cacheControl")
         append(")")
     }
