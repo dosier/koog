@@ -202,18 +202,29 @@ public open class AnthropicLLMClient @JvmOverloads constructor(
         return buildStreamFrameFlow {
             var inputTokens: Int? = null
             var outputTokens: Int? = null
+            var cacheCreationInputTokens: Int? = null
+            var cacheReadInputTokens: Int? = null
 
             fun updateUsage(usage: AnthropicUsage) {
                 inputTokens = usage.inputTokens ?: inputTokens
                 outputTokens = usage.outputTokens ?: outputTokens
+                cacheCreationInputTokens = usage.cacheCreationInputTokens ?: cacheCreationInputTokens
+                cacheReadInputTokens = usage.cacheReadInputTokens ?: cacheReadInputTokens
             }
 
-            fun getMetaInfo(): ResponseMetaInfo = ResponseMetaInfo.create(
-                clock = clock,
-                totalTokensCount = inputTokens?.plus(outputTokens ?: 0) ?: outputTokens,
-                inputTokensCount = inputTokens,
-                outputTokensCount = outputTokens,
-            )
+            fun getMetaInfo(): ResponseMetaInfo {
+                val cacheMetadata = buildJsonObject {
+                    cacheCreationInputTokens?.let { put("cacheCreationInputTokens", it) }
+                    cacheReadInputTokens?.let { put("cacheReadInputTokens", it) }
+                }.takeIf { it.isNotEmpty() }
+                return ResponseMetaInfo.create(
+                    clock = clock,
+                    totalTokensCount = inputTokens?.plus(outputTokens ?: 0) ?: outputTokens,
+                    inputTokensCount = inputTokens,
+                    outputTokensCount = outputTokens,
+                    metadata = cacheMetadata,
+                )
+            }
 
             try {
                 httpClient.sse(

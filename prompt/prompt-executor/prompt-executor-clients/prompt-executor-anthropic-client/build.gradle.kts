@@ -41,6 +41,7 @@ kotlin {
 
         jvmTest {
             dependencies {
+                implementation(project(":http-client:http-client-test"))
                 implementation(libs.ktor.client.cio)
             }
         }
