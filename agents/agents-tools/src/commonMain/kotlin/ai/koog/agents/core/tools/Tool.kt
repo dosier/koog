@@ -3,6 +3,7 @@ package ai.koog.agents.core.tools
 import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
 import ai.koog.agents.core.tools.schema.defaultJsonSchemaConfig
 import ai.koog.agents.core.tools.schema.getToolDescriptor
+import ai.koog.prompt.message.CacheControl
 import ai.koog.serialization.JSONElement
 import ai.koog.serialization.JSONObject
 import ai.koog.serialization.JSONSerializer
@@ -311,15 +312,14 @@ public abstract class Tool<TArgs, TResult>(
  */
 public class CachedTool<TArgs, TResult>(
     private val delegate: Tool<TArgs, TResult>,
-    cacheControl: LLMParams.CacheControl,
+    cacheControl: CacheControl,
 ) : Tool<TArgs, TResult>(
-    argsSerializer = delegate.argsSerializer,
-    resultSerializer = delegate.resultSerializer,
+    argsType = delegate.argsType,
+    resultType = delegate.resultType,
     descriptor = delegate.descriptor.copy(cacheControl = cacheControl),
+    metadata = delegate.metadata,
 ) {
     override suspend fun execute(args: TArgs): TResult = delegate.execute(args)
-
-    override fun encodeResultToString(result: TResult): String = delegate.encodeResultToString(result)
 }
 
 /**
@@ -335,7 +335,7 @@ public class CachedTool<TArgs, TResult>(
  * ```kotlin
  * val registry = ToolRegistry {
  *     tool(myTool)
- *     tool(expensiveTool.withCacheControl(LLMParams.CacheControl.Ephemeral))
+ *     tool(expensiveTool.withCacheControl(providerCacheControl))
  * }
  * ```
  *
@@ -343,5 +343,5 @@ public class CachedTool<TArgs, TResult>(
  * @return A new tool with the cache control setting applied.
  */
 public fun <TArgs, TResult> Tool<TArgs, TResult>.withCacheControl(
-    cacheControl: LLMParams.CacheControl
+    cacheControl: CacheControl,
 ): Tool<TArgs, TResult> = CachedTool(this, cacheControl)
