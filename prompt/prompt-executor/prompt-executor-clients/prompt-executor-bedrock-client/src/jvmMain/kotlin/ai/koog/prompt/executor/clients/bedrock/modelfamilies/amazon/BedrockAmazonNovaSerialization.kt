@@ -162,9 +162,8 @@ internal object BedrockAmazonNovaSerialization {
         totalTokensCount = novaUsage?.totalTokens,
         inputTokensCount = novaUsage?.inputTokens,
         outputTokensCount = novaUsage?.outputTokens,
-        additionalInfo = mapOf(
-            "cacheReadInputTokenCount" to novaUsage?.cacheReadInputTokenCount.toString(),
-            "cacheWriteInputTokenCount" to novaUsage?.cacheWriteInputTokenCount.toString()
-        ).filterValues { it != "null" }
+        // Nova uses cacheWriteInputTokenCount for cache creation and cacheReadInputTokenCount for cache reads
+        cacheCreationTokens = novaUsage?.cacheWriteInputTokenCount,
+        cacheReadTokens = novaUsage?.cacheReadInputTokenCount,
     )
 }

@@ -18,6 +18,8 @@ import ai.koog.prompt.executor.ollama.client.OllamaModels
 import ai.koog.prompt.tokenizer.Tokenizer
 import ai.koog.serialization.kotlinx.KotlinxSerializer
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import kotlin.time.Clock
 import kotlin.test.Test
 import kotlin.test.assertEquals
 

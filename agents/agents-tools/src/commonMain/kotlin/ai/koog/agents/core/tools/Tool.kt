@@ -295,3 +295,53 @@ public abstract class Tool<TArgs, TResult>(
     @Serializable
     public data object EmptyArgs : Args
 }
+
+/**
+ * A wrapper tool that delegates all operations to the original tool but uses a modified descriptor
+ * with cache control settings.
+ *
+ * This class enables adding cache control to existing tools without modifying their implementation.
+ * When cache control is set on a tool, LLM providers like Anthropic will cache tool definitions
+ * up to and including this tool, reducing latency and cost for repeated requests.
+ *
+ * @param TArgs The type of arguments the tool accepts.
+ * @param TResult The type of result the tool returns.
+ * @param delegate The original tool to wrap.
+ * @param cacheControl The cache control setting to apply to this tool's descriptor.
+ */
+public class CachedTool<TArgs, TResult>(
+    private val delegate: Tool<TArgs, TResult>,
+    cacheControl: LLMParams.CacheControl,
+) : Tool<TArgs, TResult>(
+    argsSerializer = delegate.argsSerializer,
+    resultSerializer = delegate.resultSerializer,
+    descriptor = delegate.descriptor.copy(cacheControl = cacheControl),
+) {
+    override suspend fun execute(args: TArgs): TResult = delegate.execute(args)
+
+    override fun encodeResultToString(result: TResult): String = delegate.encodeResultToString(result)
+}
+
+/**
+ * Creates a new tool with the specified cache control setting.
+ *
+ * This extension function wraps the original tool in a [CachedTool] that delegates all operations
+ * to the original but uses a modified descriptor with cache control.
+ *
+ * When cache control is set on a tool, LLM providers like Anthropic will cache tool definitions
+ * up to and including this tool, reducing latency and cost for repeated requests.
+ *
+ * Usage example:
+ * ```kotlin
+ * val registry = ToolRegistry {
+ *     tool(myTool)
+ *     tool(expensiveTool.withCacheControl(LLMParams.CacheControl.Ephemeral))
+ * }
+ * ```
+ *
+ * @param cacheControl The cache control setting to apply to this tool.
+ * @return A new tool with the cache control setting applied.
+ */
+public fun <TArgs, TResult> Tool<TArgs, TResult>.withCacheControl(
+    cacheControl: LLMParams.CacheControl
+): Tool<TArgs, TResult> = CachedTool(this, cacheControl)

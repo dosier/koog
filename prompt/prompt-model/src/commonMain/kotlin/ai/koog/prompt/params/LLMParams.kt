@@ -264,6 +264,39 @@ public open class LLMParams(
     }
 
     /**
+     * Controls provider-level prompt caching behavior.
+     *
+     * Provider-level caching stores input tokens on the LLM provider's servers,
+     * enabling faster processing (>2x latency reduction) and cost savings (up to 90%)
+     * for repeated prompts with static prefixes.
+     *
+     * **Supported providers:**
+     * - **Anthropic/Claude**: Explicit opt-in via `cache_control` on content blocks
+     * - **OpenAI**: Automatic caching for prompts > 1,024 tokens
+     * - **AWS Bedrock**: Cache checkpoints for supported models
+     *
+     * **Note**: This is different from application-level response caching (see `prompt-cache` module).
+     */
+    @Serializable
+    public sealed interface CacheControl {
+        /**
+         * Ephemeral cache with short TTL (typically 5 minutes).
+         * Cache is refreshed each time the cached content is used.
+         * This is the default and most cost-effective option for most use cases.
+         */
+        @Serializable
+        public data object Ephemeral : CacheControl
+
+        /**
+         * Extended cache with longer TTL (typically 1 hour).
+         * Available on Anthropic at additional cost (2x base input token price for cache writes).
+         * Useful for batch processing or when cache hits are expected over longer periods.
+         */
+        @Serializable
+        public data object Extended : CacheControl
+    }
+
+    /**
      * Used to switch tool calling behavior of LLM
      */
     @Serializable

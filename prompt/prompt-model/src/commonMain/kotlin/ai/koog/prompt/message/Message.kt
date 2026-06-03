@@ -1,5 +1,6 @@
 package ai.koog.prompt.message
 
+import ai.koog.prompt.params.LLMParams
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -377,11 +378,17 @@ public sealed interface MessageMetaInfo {
  *
  * @property timestamp The time at which the request metadata was created.
  * Defaults to the current system time if not provided.
+ * @property cacheControl Optional cache control setting for this message.
+ * When set, signals to the LLM provider that content up to and including this message
+ * should be cached. Supported by providers like Anthropic for reducing latency and cost
+ * on repeated requests with common prefixes. When null, uses the default caching behavior
+ * specified in provider-specific params (e.g., AnthropicParams.cacheControl).
  */
 @Serializable
 public data class RequestMetaInfo @JvmOverloads constructor(
     override val timestamp: Instant,
-    override val metadata: JsonObject? = null
+    override val metadata: JsonObject? = null,
+    val cacheControl: LLMParams.CacheControl? = null
 ) : MessageMetaInfo {
     /**
      * Companion object for `RequestMetaInfo` that provides factory methods and utilities related to creating instances.
@@ -391,9 +398,13 @@ public data class RequestMetaInfo @JvmOverloads constructor(
          * Creates a RequestMetadata instance with a timestamp from the provided clock.
          *
          * @param clock The clock to use for generating the timestamp.
+         * @param cacheControl Optional cache control setting for this message.
          * @return A new RequestMetadata instance with the timestamp from the provided clock.
          */
-        public fun create(clock: Clock): RequestMetaInfo = RequestMetaInfo(clock.now())
+        public fun create(
+            clock: Clock,
+            cacheControl: LLMParams.CacheControl? = null
+        ): RequestMetaInfo = RequestMetaInfo(clock.now(), cacheControl = cacheControl)
 
         /**
          * An empty instance of [RequestMetaInfo] with the timestamp set to a distant past.
@@ -422,6 +433,11 @@ public data class RequestMetaInfo @JvmOverloads constructor(
  *                          This can be used to store custom metadata that doesn't fit into the standard fields.
  * @property timestamp The timestamp indicating when the response was created.
  * Defaults to the current system time if not explicitly set.
+ * @property cacheControl Optional cache control setting for this message when sent back as context.
+ * When set on assistant messages or tool calls that are included in subsequent requests,
+ * signals to the LLM provider that content up to and including this message should be cached.
+ * Supported by providers like Anthropic for reducing latency and cost on repeated requests.
+ * When null, uses the default caching behavior specified in provider-specific params.
  */
 @Serializable
 public data class ResponseMetaInfo @JvmOverloads constructor(
@@ -429,12 +445,31 @@ public data class ResponseMetaInfo @JvmOverloads constructor(
     public val totalTokensCount: Int? = null,
     public val inputTokensCount: Int? = null,
     public val outputTokensCount: Int? = null,
+    /**
+     * Number of tokens written to the provider's cache in this request.
+     * These tokens are cached for future requests with the same prompt prefix.
+     * Cache write tokens typically cost 25% more than regular input tokens.
+     * A non-null value indicates tokens were written to cache (cache miss on prefix).
+     */
+    public val cacheCreationTokens: Int? = null,
+    /**
+     * Number of tokens read from the provider's cache in this request.
+     * These tokens were previously cached and retrieved at a reduced cost (typically 10% of input price).
+     * A non-null value indicates a cache hit occurred.
+     */
+    public val cacheReadTokens: Int? = null,
     @Deprecated(
         "additionalInfo is deprecated, use metadata instead",
         ReplaceWith("metadata")
     )
     public val additionalInfo: Map<String, String> = emptyMap(),
     override val metadata: JsonObject? = null,
+    /**
+     * Optional cache control setting for this message when sent back as context.
+     * When set on assistant messages or tool calls that are included in subsequent requests,
+     * signals to the LLM provider that content up to and including this message should be cached.
+     */
+    public val cacheControl: LLMParams.CacheControl? = null,
 ) : MessageMetaInfo {
     /**
      * Companion object for the ResponseMetaInfo class.
@@ -448,8 +483,11 @@ public data class ResponseMetaInfo @JvmOverloads constructor(
          * @param totalTokensCount The total number of tokens involved in the response, including both input and output tokens.
          * @param inputTokensCount The number of tokens used in the input.
          * @param outputTokensCount The number of tokens generated in the output.
+         * @param cacheCreationTokens Number of tokens written to the provider's cache.
+         * @param cacheReadTokens Number of tokens read from the provider's cache.
          * @param additionalInfo Deprecated: use [metadata] instead. Additional metadata as a map of string keys to string values.
          * @param metadata Additional metadata as a JSON object.
+         * @param cacheControl Optional cache control setting for this message.
          * @return A new ResponseMetadata instance with the timestamp from the provided clock.
          */
         @JvmOverloads
@@ -458,16 +496,22 @@ public data class ResponseMetaInfo @JvmOverloads constructor(
             totalTokensCount: Int? = null,
             inputTokensCount: Int? = null,
             outputTokensCount: Int? = null,
+            cacheCreationTokens: Int? = null,
+            cacheReadTokens: Int? = null,
             additionalInfo: Map<String, String> = emptyMap(),
             metadata: JsonObject? = null,
+            cacheControl: LLMParams.CacheControl? = null,
         ): ResponseMetaInfo =
             ResponseMetaInfo(
                 clock.now(),
                 totalTokensCount,
                 inputTokensCount,
                 outputTokensCount,
+                cacheCreationTokens,
+                cacheReadTokens,
                 additionalInfo,
-                metadata
+                metadata,
+                cacheControl
             )
 
         /**

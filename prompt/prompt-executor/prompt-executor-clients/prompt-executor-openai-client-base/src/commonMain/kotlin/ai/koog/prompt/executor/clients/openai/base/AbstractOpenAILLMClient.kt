@@ -503,12 +503,20 @@ public abstract class AbstractOpenAILLMClient<TResponse : OpenAIBaseLLMResponse,
     /**
      * Creates ResponseMetaInfo from usage data.
      * Should be used by concrete implementations when processing responses.
+     *
+     * Includes cache metrics from OpenAI's automatic prompt caching when available.
+     * OpenAI automatically caches prompts longer than 1,024 tokens and returns
+     * cached token counts in the usage response.
      */
     protected fun createMetaInfo(usage: OpenAIUsage?): ResponseMetaInfo = ResponseMetaInfo.create(
         clock,
         totalTokensCount = usage?.totalTokens,
         inputTokensCount = usage?.promptTokens,
-        outputTokensCount = usage?.completionTokens
+        outputTokensCount = usage?.completionTokens,
+        // OpenAI returns cached tokens in promptTokensDetails.cachedTokens
+        // Note: OpenAI doesn't have separate cache creation tokens - caching is automatic
+        cacheCreationTokens = null,
+        cacheReadTokens = usage?.promptTokensDetails?.cachedTokens,
     )
 
     protected open fun createResponseFormat(schema: LLMParams.Schema?, model: LLModel): OpenAIResponseFormat? {
